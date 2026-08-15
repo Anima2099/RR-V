@@ -1,0 +1,8 @@
+# RR-V 1.0.1 tested YouTube authentication/support runtime
+# Do not change these versions inside the 1.0.1 release line without a new regression test.
+yt-dlp-getpot-wpc==1.1.2
+nodriver==0.50.3
+mss==10.2.0
+websockets==16.1.1
+deprecated==1.3.1
+wrapt==2.3.0

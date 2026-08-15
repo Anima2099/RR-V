@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "RR-V Browser Connector",
+  "short_name": "RR-V",
+  "version": "0.1.4",
+  "description": "현재 페이지나 링크를 RR-V 다운로드 목록으로 보냅니다.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsEU4uLmZl/yzD6Q5Jn0C6DzdNLyMD1hkuL/IsMfLCcnYNOahr8ffDpFP1QVdJKRzzlRQOq7EGGo7DUdKQYq7PzCHL0azo8feTj2hkRfesL4MD8yWfFOSanK37k6Da9KEVES3ehjryYQsPTG0BJvB7Eup/EN1lnTAEj8pcLnp/+1dvXjlz7oSABs7hQKLheQWK9gmTBRdop4wN7oN9DOOi2J79OlNPGFGblfkuDf39nL9AtvpbDoiBQ3tiZxOOEhwjNLJA+zufpTzDHgvj8dqKT/SoX9oX+dol7fuWLaUVEpM7/C9BL20oKPZ5i0C+CWptbfghakiKyG0q7E+UMW/OwIDAQAB",
+  "permissions": [
+    "activeTab",
+    "contextMenus",
+    "nativeMessaging"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "현재 페이지를 RR-V로 보내기",
+    "default_icon": "RR-V.png"
+  },
+  "icons": {
+    "16": "RR-V.png",
+    "32": "RR-V.png",
+    "48": "RR-V.png",
+    "128": "RR-V.png"
+  },
+  "host_permissions": [
+    "http://127.0.0.1:47813/*"
+  ]
+}

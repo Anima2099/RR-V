@@ -1,0 +1,99 @@
+# RR-V Git ignore rules
+# Keep the repository focused on source/configuration files and prevent
+# local credentials, generated files, build output, and third-party runtime
+# payloads from being committed accidentally.
+
+# ------------------------------------------------------------
+# Python cache / virtual environments
+# ------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# ------------------------------------------------------------
+# IDE / editor local state
+# ------------------------------------------------------------
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*.swo
+*~
+
+# ------------------------------------------------------------
+# Test / analysis caches
+# ------------------------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# ------------------------------------------------------------
+# PyInstaller / packaging output
+# RR-V.spec and RR-V.version_info.txt are source files and stay tracked.
+# ------------------------------------------------------------
+build/
+dist/
+*.egg-info/
+*.log
+*.tmp
+*.bak
+
+# Local release archives and patch packages
+*.zip
+*.7z
+*.rar
+
+# ------------------------------------------------------------
+# RR-V generated third-party runtime / seed binaries
+# These are restored from the lock/preparation process or supplied locally.
+# Keep the README/lock files in Git.
+# ------------------------------------------------------------
+resources/wpc-provider/runtime/
+resources/tools/*
+!resources/tools/README.txt
+
+# ------------------------------------------------------------
+# Credentials / cookies / local RR-V state
+# RR-V normally stores these under AppData, not inside the project. These
+# rules are defense-in-depth in case a local copy is dropped into the repo.
+# ------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+auth/
+.auth/
+cookies/
+.cookies/
+cookies.txt
+*.cookies.txt
+youtube.txt
+instagram.txt
+tiktok.txt
+
+settings.ini
+download_queue.json
+download_queue.backup.json
+download_presets.json
+download_presets.backup.json
+external-url-endpoint.json
+queue_thumbnails/
+backups/
+logs/
+
+# ------------------------------------------------------------
+# Operating-system noise
+# ------------------------------------------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/

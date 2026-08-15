@@ -1,0 +1,155 @@
+# -*- mode: python ; coding: utf-8 -*-
+# RR-V 1.1.2 release spec
+
+from pathlib import Path
+
+PROJECT_ROOT = Path(SPECPATH).resolve()
+RESOURCES_DIR = PROJECT_ROOT / "resources"
+ICONS_DIR = RESOURCES_DIR / "icons"
+THEMES_DIR = RESOURCES_DIR / "themes"
+TOOLS_DIR = RESOURCES_DIR / "tools"
+WPC_PROVIDER_DIR = RESOURCES_DIR / "wpc-provider"
+WPC_RUNTIME_DIR = WPC_PROVIDER_DIR / "runtime"
+WPC_LOCK_FILE = WPC_PROVIDER_DIR / "WPC_RUNTIME_LOCK.txt"
+BROWSER_EXTENSION_DIR = RESOURCES_DIR / "browser-extension" / "rrv-chromium"
+
+LOCKED_WPC_DIST_INFO = (
+    "yt_dlp_getpot_wpc-1.1.2.dist-info",
+    "nodriver-0.50.3.dist-info",
+    "mss-10.2.0.dist-info",
+    "websockets-16.1.1.dist-info",
+    "deprecated-1.3.1.dist-info",
+    "wrapt-2.3.0.dist-info",
+)
+
+APP_ICON = ICONS_DIR / "RR-V.ico"
+APP_PNG = ICONS_DIR / "RR-V.png"
+THEME_FILE = THEMES_DIR / "warm_sage.qss"
+VERSION_FILE = PROJECT_ROOT / "RR-V.version_info.txt"
+
+REQUIRED_ICON_FILES = (
+    "RR-V.ico",
+    "RR-V.png",
+    "close.svg",
+    "collapse.svg",
+    "copy.svg",
+    "drag.svg",
+    "expand.svg",
+    "folder.svg",
+    "more.svg",
+    "retry.svg",
+    "spin_down.svg",
+    "spin_up.svg",
+    "stop.svg",
+)
+REQUIRED_TOOL_FILES = (
+    "yt-dlp.exe",
+    "ffmpeg.exe",
+    "ffprobe.exe",
+    "deno.exe",
+)
+
+required_files = [
+    THEME_FILE,
+    VERSION_FILE,
+    WPC_RUNTIME_DIR / "yt_dlp_plugins" / "extractor" / "getpot_wpc.py",
+    WPC_RUNTIME_DIR / "nodriver" / "__init__.py",
+    WPC_LOCK_FILE,
+]
+required_files.extend(WPC_RUNTIME_DIR / name / "METADATA" for name in LOCKED_WPC_DIST_INFO)
+required_files.extend(ICONS_DIR / name for name in REQUIRED_ICON_FILES)
+required_files.extend(TOOLS_DIR / name for name in REQUIRED_TOOL_FILES)
+BROWSER_EXTENSION_FILES = (
+    "manifest.json",
+    "background.js",
+    "RR-V.png",
+    "README.txt",
+)
+required_files.extend(
+    BROWSER_EXTENSION_DIR / name
+    for name in BROWSER_EXTENSION_FILES
+)
+
+missing = [path for path in required_files if not path.is_file()]
+if missing:
+    formatted = "\n".join(f"  - {path.relative_to(PROJECT_ROOT)}" for path in missing)
+    raise SystemExit(
+        "RR-V 패키징에 필요한 파일이 없습니다. 아래 파일을 준비한 뒤 다시 빌드하세요:\n"
+        + formatted
+    )
+
+actual_dist_info = {path.name for path in WPC_RUNTIME_DIR.glob("*.dist-info") if path.is_dir()}
+expected_dist_info = set(LOCKED_WPC_DIST_INFO)
+if actual_dist_info != expected_dist_info:
+    raise SystemExit(
+        "RR-V WPC 런타임 버전 구성이 잠금 목록과 다릅니다. "
+        "PREP_WPC_PROVIDER.ps1을 다시 실행하세요.\n"
+        f"Expected: {sorted(expected_dist_info)}\n"
+        f"Actual: {sorted(actual_dist_info)}"
+    )
+
+wpc_cache_files = list(WPC_RUNTIME_DIR.rglob("*.pyc"))
+wpc_cache_dirs = [path for path in WPC_RUNTIME_DIR.rglob("__pycache__") if path.is_dir()]
+if wpc_cache_files or wpc_cache_dirs:
+    raise SystemExit(
+        "WPC 배포 런타임에 __pycache__ 또는 .pyc가 남아 있습니다. "
+        "PREP_WPC_PROVIDER.ps1을 다시 실행하세요."
+    )
+
+# 리소스는 소스 실행 때와 같은 resources/... 구조로 번들 안에 넣는다.
+datas = [
+    (str(THEME_FILE), "resources/themes"),
+]
+datas.extend((str(ICONS_DIR / name), "resources/icons") for name in REQUIRED_ICON_FILES)
+datas.extend((str(TOOLS_DIR / name), "resources/tools") for name in REQUIRED_TOOL_FILES)
+datas.append((str(WPC_PROVIDER_DIR), "resources/wpc-provider"))
+datas.extend(
+    (str(BROWSER_EXTENSION_DIR / name), "resources/browser-extension/rrv-chromium")
+    for name in BROWSER_EXTENSION_FILES
+)
+
+# RR-V는 로컬 단일 실행/URL 전달에 QtNetwork를 사용한다. QtSvg와 함께
+# onefile 환경에서 명시적으로 포함한다.
+hiddenimports = [
+    "PySide6.QtNetwork",
+    "PySide6.QtSvg",
+]
+
+# 다른 Qt 바인딩이 설치되어 있어도 RR-V에는 PySide6만 사용한다.
+excludes = [
+    "PyQt5",
+    "PyQt6",
+    "PySide2",
+]
+
+a = Analysis(
+    [str(PROJECT_ROOT / "main.py")],
+    pathex=[str(PROJECT_ROOT)],
+    binaries=[],
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=excludes,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.datas,
+    [],
+    name="RR-V",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=False,
+    disable_windowed_traceback=False,
+    icon=str(APP_ICON),
+    version=str(VERSION_FILE),
+)

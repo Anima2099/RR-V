@@ -1,0 +1,109 @@
+RR-V 1.1.2 final release checklist
+
+Release rule
+[ ] Keep the development source folder separate from build/dist output.
+[ ] Keep a zipped source snapshot before every public build.
+[ ] Remove temporary patch README/BAT files from the release source folder.
+
+Before build
+[ ] app\constants.py shows APP_VERSION = "1.1.2"
+[ ] RR-V.version_info.txt shows FileVersion/ProductVersion 1.1.2
+[ ] resources\icons\RR-V.ico and RR-V.png are the intended release icons
+[ ] resources\tools\yt-dlp.exe is the intended Nightly build
+[ ] resources\tools\ffmpeg.exe exists
+[ ] resources\tools\ffprobe.exe exists
+[ ] resources\tools\deno.exe exists (Deno 2.3.0+; current tested version recommended)
+[ ] resources\wpc-provider\runtime contains WPC and nodriver
+[ ] resources\wpc-provider\WPC_RUNTIME_LOCK.txt is present and keeps the regression-tested dependency set
+[ ] The intended Python virtual environment is active in VS Code
+[ ] Do not change WPC runtime lock versions for the 1.1.2 release without restarting YouTube regression tests
+[ ] PyInstaller 6.15.0 or newer is installed when building with Python 3.14
+
+Prepare YouTube support runtime
+  powershell -ExecutionPolicy Bypass -File .\PREP_WPC_PROVIDER.ps1
+
+The script rebuilds resources\wpc-provider\runtime from the exact regression-tested lock:
+  yt-dlp-getpot-wpc 1.1.2 / nodriver 0.50.3 / mss 10.2.0 / websockets 16.1.1
+  deprecated 1.3.1 / wrapt 2.3.0
+It downloads each wheel with --no-deps, verifies the exact dist-info set, and removes
+stale __pycache__ / .pyc files before packaging.
+
+Build
+  python -m PyInstaller --clean --noconfirm RR-V.spec
+
+Expected output
+  dist\RR-V.exe
+
+Post-build source safety
+[ ] main.py still exists
+[ ] app / controllers / core / services / ui / workers still contain .py source files
+[ ] Only build/ and dist/ were created or replaced by packaging
+
+YouTube regression
+[ ] Settings > YouTube Authentication shows login / authentication refresh
+[ ] A fresh YouTube login creates RR-V-managed authentication successfully
+[ ] Existing RR-V authentication is reused after restart
+[ ] Information lookup succeeds with the current default YouTube client
+[ ] Regular-subtitle video downloads video + audio + selected subtitles
+[ ] Auto-subtitle video downloads video + audio + selected subtitles
+[ ] Embedded subtitles are present and temporary external subtitle files are cleaned up
+[ ] Normal downloads do not open a WPC browser window when PO Token minting is not required
+[ ] Manual cookie-folder fallback still works where valid
+[ ] Bot-check errors guide the user to YouTube login / authentication refresh
+[ ] Normal YouTube task logs are not forced into yt-dlp verbose mode
+
+UI regression
+[ ] YouTube authentication status is clearly highlighted
+[ ] Manual cookie folder is presented as an advanced/fallback option
+[ ] Tools & Resources shows YouTube authentication runtime (WPC / nodriver)
+[ ] Explorer / title bar / taskbar / Alt+Tab show the RR-V icon
+
+Core regression
+[ ] Custom download presets create/edit/duplicate/delete/default selection work
+[ ] Queue bulk save-path change affects only tasks that have not started
+[ ] Failed-task filter and retry-all work without changing stopped/completed tasks
+[ ] TXT export/import round-trip preserves URL order
+[ ] Thumbnail-only recovery and subtitle-only recovery work without video redownload
+[ ] System tray exit fully terminates the Python/Qt process
+[ ] Browser Connector 0.1.4 works in Chrome and Edge while RR-V is running/tray-resident
+[ ] Browser Connector Native Messaging fallback starts RR-V correctly from a fully stopped state
+[ ] Video information lookup works
+[ ] Quick add and playlist/batch add work
+[ ] Download-page TXT drag-and-drop opens Batch Add and preserves parsed URL order
+[ ] Browser link handling can be switched between queue-only and queue + automatic download
+[ ] Browser automatic-download preference saves immediately and survives restart
+[ ] Preset save action shows its saved feedback
+[ ] Analysis-stage failures create diagnostic logs usable from task cards
+[ ] Known Instagram/TikTok analysis failures show site-specific guidance instead of generic network-only guidance
+[ ] Instagram RR-V-managed login succeeds and survives restart
+[ ] Instagram authentication is applied automatically to information lookup and downloads
+[ ] Public Instagram Reels still download normally while authenticated
+[ ] Instagram fallback filenames such as "Video by <account>" include the Reel ID in the saved filename
+[ ] TikTok RR-V-managed login succeeds and survives restart
+[ ] TikTok authentication is applied automatically when yt-dlp processes TikTok URLs
+[ ] TikTok extractor/site failures remain clearly distinguished from RR-V login failures
+[ ] Download and detailed task card work
+[ ] Converter completes a WebP test
+[ ] Thumbnail replacement completes a test
+[ ] Snapshot generation completes a test
+[ ] Subtitle operation completes a test
+[ ] Settings persist after restart
+[ ] Default packaged tool restore restores yt-dlp / ffmpeg / ffprobe / deno / WPC runtime
+[ ] yt-dlp Nightly update works
+[ ] Deno update works
+
+Runtime storage
+[ ] %LOCALAPPDATA%\RR-V\tools contains yt-dlp.exe / ffmpeg.exe / ffprobe.exe / deno.exe
+[ ] %LOCALAPPDATA%\RR-V\wpc-provider\runtime contains WPC / nodriver support runtime
+[ ] Legacy temporary provider resources are removed automatically after RR-V starts
+[ ] Old %APPDATA%\RR-V\tools copies are removed after LocalAppData tools are confirmed
+[ ] YouTube auth session folders older than 24 hours are cleaned automatically
+[ ] %APPDATA%\RR-V stores settings / logs / backups / queue normally
+
+Public distribution
+[ ] Create/review THIRD_PARTY_NOTICES.txt before public release
+[ ] Preserve matching yt-dlp Nightly license/source information
+[ ] Preserve the Deno MIT license notice/source record
+[ ] Identify the exact FFmpeg build and preserve its required license/source information
+[ ] Preserve WPC/nodriver and bundled Python dependency license notices/source records
+[ ] Archive exact RR-V 1.1.2 source, spec, seed tools, browser extension, and final EXE

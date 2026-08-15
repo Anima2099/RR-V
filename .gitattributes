@@ -1,0 +1,16 @@
+# Normalize text files in Git while keeping Windows scripts convenient.
+* text=auto
+
+*.py   text eol=lf
+*.js   text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.qss  text eol=lf
+*.svg  text eol=lf
+*.spec text eol=lf
+*.txt  text eol=lf
+*.ps1  text eol=crlf
+
+*.png  binary
+*.ico  binary
+*.exe  binary
