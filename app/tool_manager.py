@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from typing import Callable
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+import zipfile
 
+from app.constants import APP_VERSION
 from app.paths import (
     WPC_PROVIDER_VERSION,
     RRV_WPC_PROVIDER_DIR,
@@ -15,6 +23,11 @@ from app.paths import (
     has_bundled_tools,
     wpc_provider_runtime_ready,
     restore_bundled_tools,
+)
+from app.tool_sources import (
+    FFMPEG_RELEASE_SHA256_URL,
+    FFMPEG_RELEASE_VERSION_URL,
+    FFMPEG_RELEASE_ZIP_URL,
 )
 
 
@@ -37,11 +50,15 @@ _TOOL_SPECS = (
 
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_SHA256_RE = re.compile(r"\b([0-9a-fA-F]{64})\b")
+_FFMPEG_RELEASE_VERSION_RE = re.compile(
+    r"(?<![\d.-])(\d+\.\d+(?:\.\d+)?)(?=[-+\s]|$)",
+    re.IGNORECASE,
+)
 
 
 def _strip_ansi(text: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", text)
-
 
 
 def _creation_flags() -> int:
@@ -180,6 +197,199 @@ def update_deno(progress: Callable[[str], None] | None = None) -> tuple[bool, st
     if result.returncode != 0:
         return False, output or "Deno 업데이트에 실패했습니다."
     return True, output or "Deno 업데이트 확인 완료"
+
+
+def _fetch_small_text(url: str) -> str:
+    request = Request(
+        url,
+        headers={
+            "User-Agent": f"RR-V/{APP_VERSION}",
+            "Accept": "text/plain",
+            "Cache-Control": "no-cache",
+        },
+    )
+    with urlopen(request, timeout=12) as response:
+        data = response.read(256 * 1024)
+    return data.decode("utf-8", errors="replace").strip()
+
+
+def _ffmpeg_release_version(value: str) -> str:
+    match = _FFMPEG_RELEASE_VERSION_RE.search(value)
+    return match.group(1) if match else value.strip()
+
+
+def _download_file(
+    url: str,
+    destination: Path,
+    progress: Callable[[str], None] | None = None,
+) -> None:
+    request = Request(
+        url,
+        headers={
+            "User-Agent": f"RR-V/{APP_VERSION}",
+            "Accept": "application/zip, application/octet-stream;q=0.9, */*;q=0.1",
+            "Cache-Control": "no-cache",
+        },
+    )
+    if progress is not None:
+        progress("FFmpeg Release Essentials 다운로드 중… 약 100 MB")
+    with urlopen(request, timeout=60) as response, destination.open("wb") as output:
+        shutil.copyfileobj(response, output, length=1024 * 1024)
+
+
+def _sha256_for(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while True:
+            chunk = stream.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _extract_ffmpeg_pair(archive_path: Path, target_dir: Path) -> tuple[Path, Path]:
+    with zipfile.ZipFile(archive_path) as archive:
+        selected: dict[str, zipfile.ZipInfo] = {}
+        for member in archive.infolist():
+            normalized = member.filename.replace("\\", "/").lower()
+            if normalized.endswith("/bin/ffmpeg.exe"):
+                selected["ffmpeg.exe"] = member
+            elif normalized.endswith("/bin/ffprobe.exe"):
+                selected["ffprobe.exe"] = member
+
+        if set(selected) != {"ffmpeg.exe", "ffprobe.exe"}:
+            raise ValueError("다운로드한 FFmpeg ZIP에서 ffmpeg.exe와 ffprobe.exe를 찾지 못했습니다.")
+
+        extracted: dict[str, Path] = {}
+        for filename, member in selected.items():
+            destination = target_dir / filename
+            with archive.open(member) as source, destination.open("wb") as output:
+                shutil.copyfileobj(source, output, length=1024 * 1024)
+            extracted[filename] = destination
+
+    return extracted["ffmpeg.exe"], extracted["ffprobe.exe"]
+
+
+def _rollback_tool_pair(
+    installed: list[Path],
+    backups: dict[Path, Path],
+) -> None:
+    for destination in installed:
+        try:
+            if destination.exists():
+                destination.unlink()
+        except OSError:
+            pass
+    for destination, backup in backups.items():
+        try:
+            if backup.exists():
+                os.replace(backup, destination)
+        except OSError:
+            pass
+
+
+def update_ffmpeg_release(
+    progress: Callable[[str], None] | None = None,
+) -> tuple[bool, str]:
+    """Gyan Release Essentials ZIP에서 ffmpeg/ffprobe를 검증 후 한 쌍으로 교체한다."""
+    try:
+        latest_text = _fetch_small_text(FFMPEG_RELEASE_VERSION_URL)
+        latest_version = _ffmpeg_release_version(latest_text)
+        if not re.fullmatch(r"\d+\.\d+(?:\.\d+)?", latest_version):
+            return False, "FFmpeg 최신 Release 버전 정보를 확인하지 못했습니다."
+
+        current = find_executable("ffmpeg.exe")
+        if current is not None:
+            current_version = _ffmpeg_release_version(_version_for(current, ("-version",)))
+            if current_version == latest_version:
+                return True, f"FFmpeg / FFprobe {latest_version} · 이미 최신 상태입니다."
+
+        sha_text = _fetch_small_text(FFMPEG_RELEASE_SHA256_URL)
+        sha_match = _SHA256_RE.search(sha_text)
+        if sha_match is None:
+            return False, "FFmpeg SHA-256 정보를 확인하지 못해 업데이트를 중단했습니다."
+        expected_sha256 = sha_match.group(1).lower()
+
+        RRV_TOOLS_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(
+            prefix="rrv-ffmpeg-update-",
+            dir=str(RRV_TOOLS_DIR.parent),
+        ) as temporary_dir:
+            temporary_root = Path(temporary_dir)
+            archive_path = temporary_root / "ffmpeg-release-essentials.zip"
+            staging_dir = temporary_root / "staging"
+            staging_dir.mkdir(parents=True, exist_ok=True)
+
+            _download_file(FFMPEG_RELEASE_ZIP_URL, archive_path, progress)
+            if progress is not None:
+                progress("FFmpeg 다운로드 검증 중…")
+            actual_sha256 = _sha256_for(archive_path)
+            if actual_sha256.lower() != expected_sha256:
+                return False, "FFmpeg ZIP의 SHA-256이 일치하지 않아 업데이트를 중단했습니다."
+
+            staged_ffmpeg, staged_ffprobe = _extract_ffmpeg_pair(
+                archive_path,
+                staging_dir,
+            )
+            staged_versions = (
+                _ffmpeg_release_version(_version_for(staged_ffmpeg, ("-version",))),
+                _ffmpeg_release_version(_version_for(staged_ffprobe, ("-version",))),
+            )
+            if staged_versions != (latest_version, latest_version):
+                return False, "새 FFmpeg / FFprobe 실행 파일의 버전 검증에 실패했습니다."
+
+            if progress is not None:
+                progress("FFmpeg / FFprobe 안전 교체 중…")
+
+            destinations = {
+                staged_ffmpeg: RRV_TOOLS_DIR / "ffmpeg.exe",
+                staged_ffprobe: RRV_TOOLS_DIR / "ffprobe.exe",
+            }
+            backups: dict[Path, Path] = {}
+            installed: list[Path] = []
+
+            try:
+                for destination in destinations.values():
+                    backup = destination.with_name(destination.name + ".rrv-backup")
+                    if backup.exists():
+                        backup.unlink()
+                    if destination.exists():
+                        os.replace(destination, backup)
+                        backups[destination] = backup
+
+                for staged, destination in destinations.items():
+                    os.replace(staged, destination)
+                    installed.append(destination)
+
+                final_versions = (
+                    _ffmpeg_release_version(
+                        _version_for(RRV_TOOLS_DIR / "ffmpeg.exe", ("-version",))
+                    ),
+                    _ffmpeg_release_version(
+                        _version_for(RRV_TOOLS_DIR / "ffprobe.exe", ("-version",))
+                    ),
+                )
+                if final_versions != (latest_version, latest_version):
+                    raise RuntimeError("교체 후 실행 검증에 실패했습니다.")
+            except (OSError, RuntimeError) as error:
+                _rollback_tool_pair(installed, backups)
+                if isinstance(error, PermissionError):
+                    return False, (
+                        "FFmpeg를 사용하는 작업이 실행 중일 수 있습니다. "
+                        "다운로드와 미디어 작업을 모두 끝낸 뒤 다시 시도해 주세요."
+                    )
+                return False, f"FFmpeg 교체에 실패해 이전 버전으로 복구했습니다: {error}"
+
+            for backup in backups.values():
+                try:
+                    backup.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+        return True, f"FFmpeg / FFprobe {latest_version} 업데이트 완료"
+    except (OSError, HTTPError, URLError, zipfile.BadZipFile, ValueError) as error:
+        return False, f"FFmpeg 업데이트에 실패했습니다: {error}"
 
 
 def restore_packaged_tools() -> tuple[bool, str]:
