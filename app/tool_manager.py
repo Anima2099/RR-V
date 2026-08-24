@@ -218,6 +218,22 @@ def _ffmpeg_release_version(value: str) -> str:
     return match.group(1) if match else value.strip()
 
 
+def _download_progress_text(downloaded: int, total: int) -> str:
+    downloaded_mb = downloaded / (1024 * 1024)
+    if total <= 0:
+        return f"↓ FFmpeg 업데이트 다운로드 중 · {downloaded_mb:.1f} MB 받음"
+
+    total_mb = total / (1024 * 1024)
+    percent = max(0, min(100, int(downloaded * 100 / total)))
+    slots = 16
+    filled = min(slots, int(percent * slots / 100))
+    bar = "█" * filled + "░" * (slots - filled)
+    return (
+        f"↓ FFmpeg 업데이트 다운로드 중 · {downloaded_mb:.1f} / {total_mb:.1f} MB · {percent}%\n"
+        f"{bar}"
+    )
+
+
 def _download_file(
     url: str,
     destination: Path,
@@ -231,10 +247,42 @@ def _download_file(
             "Cache-Control": "no-cache",
         },
     )
-    if progress is not None:
-        progress("FFmpeg Release Essentials 다운로드 중… 약 100 MB")
+
     with urlopen(request, timeout=60) as response, destination.open("wb") as output:
-        shutil.copyfileobj(response, output, length=1024 * 1024)
+        try:
+            total = int(response.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            total = 0
+
+        downloaded = 0
+        last_percent = -1
+        if progress is not None:
+            progress(_download_progress_text(0, total))
+
+        while True:
+            chunk = response.read(1024 * 1024)
+            if not chunk:
+                break
+            output.write(chunk)
+            downloaded += len(chunk)
+
+            if progress is None:
+                continue
+
+            if total > 0:
+                percent = max(0, min(100, int(downloaded * 100 / total)))
+                # 100 MB 전후의 파일에서 UI 신호를 과도하게 보내지 않으면서도
+                # 진행이 살아 움직이는 느낌을 주도록 퍼센트가 바뀔 때만 갱신한다.
+                if percent == last_percent:
+                    continue
+                last_percent = percent
+            progress(_download_progress_text(downloaded, total))
+
+        if progress is not None:
+            progress(
+                f"✓ FFmpeg 다운로드 완료 · {downloaded / (1024 * 1024):.1f} MB\n"
+                "파일 무결성 확인 중…"
+            )
 
 
 def _sha256_for(path: Path) -> str:
@@ -323,11 +371,13 @@ def update_ffmpeg_release(
 
             _download_file(FFMPEG_RELEASE_ZIP_URL, archive_path, progress)
             if progress is not None:
-                progress("FFmpeg 다운로드 검증 중…")
+                progress("✓ FFmpeg ZIP 다운로드 완료 · SHA-256 검증 중…")
             actual_sha256 = _sha256_for(archive_path)
             if actual_sha256.lower() != expected_sha256:
                 return False, "FFmpeg ZIP의 SHA-256이 일치하지 않아 업데이트를 중단했습니다."
 
+            if progress is not None:
+                progress("✓ SHA-256 확인 완료 · 새 FFmpeg / FFprobe 준비 중…")
             staged_ffmpeg, staged_ffprobe = _extract_ffmpeg_pair(
                 archive_path,
                 staging_dir,
@@ -340,7 +390,7 @@ def update_ffmpeg_release(
                 return False, "새 FFmpeg / FFprobe 실행 파일의 버전 검증에 실패했습니다."
 
             if progress is not None:
-                progress("FFmpeg / FFprobe 안전 교체 중…")
+                progress("↻ FFmpeg / FFprobe 안전 교체 중…")
 
             destinations = {
                 staged_ffmpeg: RRV_TOOLS_DIR / "ffmpeg.exe",
@@ -362,6 +412,8 @@ def update_ffmpeg_release(
                     os.replace(staged, destination)
                     installed.append(destination)
 
+                if progress is not None:
+                    progress("↻ 새 FFmpeg / FFprobe 실행 확인 중…")
                 final_versions = (
                     _ffmpeg_release_version(
                         _version_for(RRV_TOOLS_DIR / "ffmpeg.exe", ("-version",))
