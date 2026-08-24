@@ -21,7 +21,12 @@ from app.paths import (
     SPIN_DOWN_ICON_PATH,
     SPIN_UP_ICON_PATH,
     APP_ICON_PATH,
-    WARM_SAGE_THEME_PATH,
+)
+from app.theme import (
+    active_theme_path,
+    apply_active_palette,
+    initialize_active_theme,
+    themed_icon_path,
 )
 from app.download_log import download_log_path
 from app.settings_backup import ensure_daily_auto_backup
@@ -66,15 +71,16 @@ def choose_application_font() -> QFont:
 
 
 def load_theme() -> str:
+    theme_path = active_theme_path()
     try:
-        theme = WARM_SAGE_THEME_PATH.read_text(encoding="utf-8")
+        theme = theme_path.read_text(encoding="utf-8")
     except OSError as error:
         print(f"RR-V theme load failed: {error}")
         return ""
 
     replacements = {
-        "__SPIN_UP_ICON__": f'"{SPIN_UP_ICON_PATH.as_posix()}"',
-        "__SPIN_DOWN_ICON__": f'"{SPIN_DOWN_ICON_PATH.as_posix()}"',
+        "__SPIN_UP_ICON__": f'"{themed_icon_path(SPIN_UP_ICON_PATH).as_posix()}"',
+        "__SPIN_DOWN_ICON__": f'"{themed_icon_path(SPIN_DOWN_ICON_PATH).as_posix()}"',
     }
     for marker, value in replacements.items():
         theme = theme.replace(marker, value)
@@ -96,7 +102,7 @@ def preload_task_icons() -> None:
     )
     for path in paths:
         # SVG 플러그인과 아이콘 픽스맵 캐시를 프로그램 시작 때 미리 준비한다.
-        QIcon(str(path)).pixmap(20, 20)
+        QIcon(str(themed_icon_path(path))).pixmap(20, 20)
     write_performance(
         "startup.preload_task_icons",
         (perf_counter() - started) * 1000.0,
@@ -119,6 +125,8 @@ def create_application(arguments: Sequence[str]) -> QApplication:
     except OSError as error:
         print(f"RR-V settings store migration failed: {error}")
 
+    initialize_active_theme()
+
     try:
         ensure_daily_auto_backup()
     except OSError as error:
@@ -126,6 +134,7 @@ def create_application(arguments: Sequence[str]) -> QApplication:
 
     application_font = choose_application_font()
     app.setFont(application_font)
+    apply_active_palette(app)
     app.setStyleSheet(load_theme())
     preload_task_icons()
 
