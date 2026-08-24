@@ -10,20 +10,21 @@ from urllib.request import Request, urlopen
 from app.constants import APP_VERSION
 from app.settings_store import get_settings
 from app.tool_manager import inspect_tools
+from app.tool_sources import (
+    FFMPEG_RELEASE_VERSION_URL,
+    FFMPEG_RELEASES_PAGE,
+    YTDLP_LATEST_API,
+    YTDLP_RELEASES_PAGE,
+)
 
-
-YTDLP_LATEST_API = "https://api.github.com/repos/yt-dlp/yt-dlp-nightly-builds/releases/latest"
-YTDLP_RELEASES_PAGE = "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases"
-FFMPEG_GYAN_VERSION_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-git-essentials.7z.ver"
-FFMPEG_GYAN_PAGE = "https://www.gyan.dev/ffmpeg/builds/"
 
 _UPDATE_CHECK_INTERVAL_SECONDS = 24 * 60 * 60
 _LAST_CHECK_KEY = "updates/last_component_check_epoch"
 _LAST_LOCAL_SIGNATURE_KEY = "updates/last_component_local_signature"
 
 _YTDLP_VERSION_RE = re.compile(r"\d{4}\.\d{2}\.\d{2}(?:\.\d{6})?")
-_FFMPEG_GIT_VERSION_RE = re.compile(
-    r"\d{4}-\d{2}-\d{2}-git-[0-9a-f]+",
+_FFMPEG_RELEASE_VERSION_RE = re.compile(
+    r"(?<![\d.-])(\d+\.\d+(?:\.\d+)?)(?=[-+\s]|$)",
     re.IGNORECASE,
 )
 
@@ -87,8 +88,7 @@ def _mark_check_attempt(local_signature: str) -> None:
 
 def update_check_due(local_signature: str) -> bool:
     # 하루 안에 이미 확인했더라도 사용자가 yt-dlp/FFmpeg/FFprobe 파일을 직접
-    # 교체했다면 즉시 다시 확인한다. 도구 교체를 '오늘 이미 확인함' 캐시가
-    # 가리는 일을 막는다.
+    # 교체했다면 즉시 다시 확인한다. 도구 교체를 캐시가 가리는 일을 막는다.
     if local_signature != _read_last_local_signature():
         return True
 
@@ -133,9 +133,19 @@ def _normalize_ytdlp_version(value: str) -> str:
     return match.group(0) if match else value.strip()
 
 
-def _normalize_ffmpeg_version(value: str) -> str:
-    match = _FFMPEG_GIT_VERSION_RE.search(value)
-    return match.group(0) if match else value.strip()
+def normalize_ffmpeg_release_version(value: str) -> str:
+    match = _FFMPEG_RELEASE_VERSION_RE.search(value)
+    return match.group(1) if match else value.strip()
+
+
+def _release_tuple(value: str) -> tuple[int, ...] | None:
+    normalized = normalize_ffmpeg_release_version(value)
+    if not re.fullmatch(r"\d+\.\d+(?:\.\d+)?", normalized):
+        return None
+    try:
+        return tuple(int(part) for part in normalized.split("."))
+    except ValueError:
+        return None
 
 
 def _check_ytdlp(current: str) -> ComponentVersionCheck:
@@ -173,35 +183,37 @@ def _check_ytdlp(current: str) -> ComponentVersionCheck:
 
 def _check_ffmpeg(current: str) -> ComponentVersionCheck:
     try:
-        latest_text = _fetch_text(FFMPEG_GYAN_VERSION_URL)
-        latest = _normalize_ffmpeg_version(latest_text)
-        if not _FFMPEG_GIT_VERSION_RE.fullmatch(latest):
-            raise ValueError("Gyan Git Essentials 버전 형식을 확인하지 못했습니다.")
+        latest_text = _fetch_text(FFMPEG_RELEASE_VERSION_URL)
+        latest = normalize_ffmpeg_release_version(latest_text)
+        latest_tuple = _release_tuple(latest)
+        if latest_tuple is None:
+            raise ValueError("FFmpeg Release Essentials 버전 형식을 확인하지 못했습니다.")
 
-        current_normalized = _normalize_ffmpeg_version(current)
-        if _FFMPEG_GIT_VERSION_RE.fullmatch(current_normalized):
-            update_available = current_normalized.lower() != latest.lower()
-        else:
-            # RR-V의 공식 FFmpeg 채널은 Gyan Git Master Essentials다. 다른 형식의
-            # 빌드가 설치되어 있으면 최신 공식 채널로 교체할 수 있게 안내한다.
+        current_normalized = normalize_ffmpeg_release_version(current)
+        current_tuple = _release_tuple(current)
+        if current_tuple is None:
+            # RR-V의 공식 채널은 Release Essentials다. Git Master 등 다른
+            # 채널의 빌드는 다음 업데이트에서 Release Essentials로 정리한다.
             update_available = True
+        else:
+            update_available = current_tuple < latest_tuple
 
         return ComponentVersionCheck(
             key="ffmpeg",
-            label="FFmpeg / FFprobe · Gyan Git Essentials",
+            label="FFmpeg / FFprobe",
             current=current_normalized,
             latest=latest,
             update_available=update_available,
-            source_url=FFMPEG_GYAN_PAGE,
+            source_url=FFMPEG_RELEASES_PAGE,
         )
     except (OSError, HTTPError, URLError, ValueError) as error:
         return ComponentVersionCheck(
             key="ffmpeg",
-            label="FFmpeg / FFprobe · Gyan Git Essentials",
-            current=_normalize_ffmpeg_version(current),
+            label="FFmpeg / FFprobe",
+            current=normalize_ffmpeg_release_version(current),
             latest="확인 실패",
             update_available=None,
-            source_url=FFMPEG_GYAN_PAGE,
+            source_url=FFMPEG_RELEASES_PAGE,
             error=str(error),
         )
 
