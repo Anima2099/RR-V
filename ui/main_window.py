@@ -25,7 +25,7 @@ from app.constants import (
 )
 from ui.pages.download_page import DownloadPage
 from ui.pages.media_tools_page import MediaToolsPage
-from ui.pages.settings_page import SettingsPage
+from ui.pages.theme_settings_page import ThemeSettingsPage
 from ui.dialogs.warm_dialogs import ask_warm_question
 from ui.sidebar import Sidebar
 
@@ -44,7 +44,7 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
         self.download_page = DownloadPage()
         self.media_tools_page = MediaToolsPage()
-        self.settings_page = SettingsPage()
+        self.settings_page = ThemeSettingsPage()
         self.settings_page.general_preferences_saved.connect(
             self._apply_tray_preferences
         )
