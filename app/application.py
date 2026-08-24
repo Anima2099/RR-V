@@ -22,7 +22,10 @@ from app.paths import (
     SPIN_UP_ICON_PATH,
     APP_ICON_PATH,
 )
+from app.dark_theme import build_dark_stylesheet
 from app.theme import (
+    THEME_DARK,
+    active_theme_mode,
     active_theme_path,
     apply_active_palette,
     initialize_active_theme,
@@ -77,6 +80,9 @@ def load_theme() -> str:
     except OSError as error:
         print(f"RR-V theme load failed: {error}")
         return ""
+
+    if active_theme_mode() == THEME_DARK:
+        theme = build_dark_stylesheet(theme)
 
     replacements = {
         "__SPIN_UP_ICON__": f'"{themed_icon_path(SPIN_UP_ICON_PATH).as_posix()}"',
