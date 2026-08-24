@@ -11,7 +11,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RESOURCES_DIR = PROJECT_ROOT / "resources"
 THEMES_DIR = RESOURCES_DIR / "themes"
 ICONS_DIR = RESOURCES_DIR / "icons"
-DARK_ICONS_DIR = ICONS_DIR / "dark"
 BUNDLED_TOOLS_DIR = RESOURCES_DIR / "tools"
 BUNDLED_WPC_PROVIDER_DIR = RESOURCES_DIR / "wpc-provider"
 BUNDLED_WPC_RUNTIME_DIR = BUNDLED_WPC_PROVIDER_DIR / "runtime"
@@ -25,7 +24,6 @@ BUNDLED_BROWSER_EXTENSION_DIR = (
 _BROWSER_EXTENSION_FILES = ("manifest.json", "background.js", "RR-V.png", "README.txt")
 WPC_PROVIDER_VERSION = "1.1.2"
 WARM_SAGE_THEME_PATH = THEMES_DIR / "warm_sage.qss"
-WARM_SAGE_DARK_THEME_PATH = THEMES_DIR / "warm_sage_dark.qss"
 
 APPDATA_DIR = Path(os.environ.get("APPDATA", Path.home()))
 LOCALAPPDATA_DIR = Path(os.environ.get("LOCALAPPDATA", APPDATA_DIR))
@@ -220,20 +218,40 @@ def cleanup_legacy_roaming_tools_once() -> bool:
     """이관이 끝난 Roaming의 구형 도구 복사본을 한 번 정리한다.
 
     현재 LocalAppData에 필수 실행 도구 4개가 모두 준비된 경우에만, RR-V가
-    더 이상 사용하지 않는 Roaming\\RR-V\\tools 폴더를 제거한다.
+    과거에 관리하던 정확한 파일명만 삭제한다. 사용자가 별도로 넣은 알 수 없는
+    파일은 건드리지 않으며 폴더가 비었을 때만 폴더 자체를 제거한다.
     """
-    if _LEGACY_ROAMING_TOOLS_CLEANUP_MARKER.exists():
-        return False
+
+    if _LEGACY_ROAMING_TOOLS_CLEANUP_MARKER.is_file():
+        return True
+
     if not all((RRV_TOOLS_DIR / name).is_file() for name in _RUNTIME_TOOL_NAMES):
         return False
 
-    removed = False
-    if _LEGACY_RRV_TOOLS_DIR.exists():
-        try:
-            shutil.rmtree(_LEGACY_RRV_TOOLS_DIR)
-            removed = True
-        except OSError:
-            return False
+    try:
+        for name in _RUNTIME_TOOL_NAMES:
+            legacy = _LEGACY_RRV_TOOLS_DIR / name
+            if legacy.is_file():
+                legacy.unlink()
+
+        legacy_plugin_dir = _LEGACY_RRV_TOOLS_DIR / "yt-dlp-plugins"
+        legacy_bgutil = legacy_plugin_dir / "bgutil-ytdlp-pot-provider.zip"
+        if legacy_bgutil.is_file():
+            legacy_bgutil.unlink()
+
+        if legacy_plugin_dir.is_dir():
+            try:
+                legacy_plugin_dir.rmdir()
+            except OSError:
+                pass
+
+        if _LEGACY_RRV_TOOLS_DIR.is_dir():
+            try:
+                _LEGACY_RRV_TOOLS_DIR.rmdir()
+            except OSError:
+                pass
+    except OSError:
+        return False
 
     try:
         _LEGACY_ROAMING_TOOLS_CLEANUP_MARKER.write_text(
@@ -241,160 +259,229 @@ def cleanup_legacy_roaming_tools_once() -> bool:
             encoding="utf-8",
         )
     except OSError:
-        pass
-    return removed
-
-
-def cleanup_legacy_bgutil_once() -> bool:
-    """1.0.1에서 사용하지 않는 bgutil provider 잔재를 한 번 제거한다."""
-    if _LEGACY_BGUTIL_CLEANUP_MARKER.exists():
         return False
-
-    removed = False
-    for path in (_LEGACY_BGUTIL_PROVIDER_DIR, _LEGACY_BGUTIL_PLUGIN_PATH):
-        if not path.exists():
-            continue
-        try:
-            if path.is_dir():
-                shutil.rmtree(path)
-            else:
-                path.unlink()
-            removed = True
-        except OSError:
-            return False
-
-    try:
-        _LEGACY_BGUTIL_CLEANUP_MARKER.parent.mkdir(parents=True, exist_ok=True)
-        _LEGACY_BGUTIL_CLEANUP_MARKER.write_text(
-            "RR-V 1.0.1 legacy bgutil provider cleanup completed.\n",
-            encoding="utf-8",
-        )
-    except OSError:
-        pass
-    return removed
+    return True
 
 
-def cleanup_stale_auth_sessions() -> int:
-    """하루 이상 남은 로그인 임시 프로필만 안전하게 정리한다."""
-    if not RRV_YOUTUBE_AUTH_SESSION_DIR.exists():
+def cleanup_stale_auth_sessions(
+    max_age_seconds: int = _STALE_AUTH_SESSION_MAX_AGE_SECONDS,
+) -> int:
+    """비정상 종료 뒤 남은 오래된 YouTube 임시 브라우저 프로필을 정리한다."""
+
+    if not RRV_YOUTUBE_AUTH_SESSION_DIR.is_dir():
         return 0
 
     now = time.time()
     removed = 0
-    for path in RRV_YOUTUBE_AUTH_SESSION_DIR.iterdir():
-        if not path.is_dir() or not path.name.startswith("session_"):
+    try:
+        candidates = tuple(RRV_YOUTUBE_AUTH_SESSION_DIR.iterdir())
+    except OSError:
+        return 0
+
+    for candidate in candidates:
+        if not candidate.is_dir() or not candidate.name.startswith("session_"):
             continue
         try:
-            age = now - path.stat().st_mtime
+            age = now - candidate.stat().st_mtime
         except OSError:
             continue
-        if age < _STALE_AUTH_SESSION_MAX_AGE_SECONDS:
+        if age < max(0, max_age_seconds):
             continue
         try:
-            shutil.rmtree(path)
-            removed += 1
+            shutil.rmtree(candidate)
         except OSError:
-            pass
+            continue
+        removed += 1
+
     return removed
 
 
-def cleanup_local_test_artifacts() -> bool:
-    """개발 중에만 사용했던 auth-test 폴더가 남아 있으면 제거한다."""
-    if not _LEGACY_AUTH_TEST_DIR.exists():
-        return False
-    try:
-        shutil.rmtree(_LEGACY_AUTH_TEST_DIR)
-        return True
-    except OSError:
-        return False
 
+def cleanup_local_test_artifacts() -> tuple[int, bool, bool]:
+    """1.0.1 진단 과정에서 LocalAppData에 남은 작은 테스트 흔적을 정리한다.
 
-def bootstrap_runtime_wpc_provider() -> bool:
-    """검증된 WPC provider 런타임을 LocalAppData에 준비한다."""
-    bundled_runtime = BUNDLED_WPC_RUNTIME_DIR
-    if not bundled_runtime.is_dir():
-        return False
+    - auth-test는 RR-V 인증 프로토타입이 만든 전용 테스트 폴더라 통째로 제거한다.
+    - tools/yt-dlp-plugins는 비어 있을 때만 제거해 사용자가 넣은 다른 파일은 건드리지 않는다.
+    - WPC runtime의 __pycache__ / .pyc는 재생성 가능한 Python 캐시라 제거한다.
+    """
 
-    current_marker = ""
-    try:
-        current_marker = _WPC_PROVIDER_MARKER.read_text(encoding="utf-8").strip()
-    except OSError:
-        pass
+    removed_cache_dirs = 0
+    auth_test_removed = False
+    legacy_plugin_dir_removed = False
 
-    required_paths = (
-        RRV_WPC_RUNTIME_DIR / "yt_dlp_plugins" / "extractor" / "getpot_wpc.py",
-        RRV_WPC_RUNTIME_DIR / "nodriver" / "__init__.py",
-    )
-    if current_marker == WPC_PROVIDER_VERSION and all(path.is_file() for path in required_paths):
-        return False
-
-    temporary = RRV_WPC_PROVIDER_DIR.with_name(RRV_WPC_PROVIDER_DIR.name + ".rrv-update")
-    backup = RRV_WPC_PROVIDER_DIR.with_name(RRV_WPC_PROVIDER_DIR.name + ".rrv-backup")
-    try:
-        if temporary.exists():
-            shutil.rmtree(temporary)
-        if backup.exists():
-            shutil.rmtree(backup)
-
-        shutil.copytree(BUNDLED_WPC_PROVIDER_DIR, temporary)
-        marker = temporary / ".rrv_wpc_version"
-        marker.write_text(WPC_PROVIDER_VERSION + "\n", encoding="utf-8")
-
-        if RRV_WPC_PROVIDER_DIR.exists():
-            os.replace(RRV_WPC_PROVIDER_DIR, backup)
-        os.replace(temporary, RRV_WPC_PROVIDER_DIR)
-        if backup.exists():
-            shutil.rmtree(backup, ignore_errors=True)
-        return True
-    except OSError:
+    if _LEGACY_AUTH_TEST_DIR.exists():
         try:
-            if RRV_WPC_PROVIDER_DIR.exists() and backup.exists():
-                shutil.rmtree(RRV_WPC_PROVIDER_DIR, ignore_errors=True)
-                os.replace(backup, RRV_WPC_PROVIDER_DIR)
+            shutil.rmtree(_LEGACY_AUTH_TEST_DIR)
+            auth_test_removed = True
         except OSError:
             pass
+
+    if RRV_WPC_RUNTIME_DIR.is_dir():
         try:
-            if temporary.exists():
-                shutil.rmtree(temporary, ignore_errors=True)
+            pyc_files = tuple(RRV_WPC_RUNTIME_DIR.rglob("*.pyc"))
         except OSError:
-            pass
-        return False
-
-
-def find_executable(name: str) -> Path | None:
-    candidate = RRV_TOOLS_DIR / name
-    return candidate if candidate.is_file() else None
-
-
-def has_bundled_tools() -> bool:
-    return all((BUNDLED_TOOLS_DIR / name).is_file() for name in _RUNTIME_TOOL_NAMES)
-
-
-def restore_bundled_tools() -> tuple[str, ...]:
-    restored: list[str] = []
-    RRV_TOOLS_DIR.mkdir(parents=True, exist_ok=True)
-    for name in _RUNTIME_TOOL_NAMES:
-        source = BUNDLED_TOOLS_DIR / name
-        if not source.is_file():
-            continue
-        destination = RRV_TOOLS_DIR / name
-        temporary = destination.with_name(destination.name + ".rrv-update")
-        try:
-            shutil.copy2(source, temporary)
-            os.replace(temporary, destination)
-            restored.append(name)
-        except OSError:
+            pyc_files = ()
+        for pyc in pyc_files:
             try:
-                if temporary.exists():
-                    temporary.unlink()
+                pyc.unlink()
             except OSError:
                 pass
-    bootstrap_runtime_wpc_provider()
-    return tuple(restored)
+
+        try:
+            cache_dirs = sorted(
+                (path for path in RRV_WPC_RUNTIME_DIR.rglob("__pycache__") if path.is_dir()),
+                key=lambda path: len(path.parts),
+                reverse=True,
+            )
+        except OSError:
+            cache_dirs = []
+        for cache_dir in cache_dirs:
+            try:
+                shutil.rmtree(cache_dir)
+                removed_cache_dirs += 1
+            except OSError:
+                pass
+
+    if _LEGACY_YTDLP_PLUGIN_DIR.is_dir():
+        try:
+            next(_LEGACY_YTDLP_PLUGIN_DIR.iterdir())
+        except StopIteration:
+            try:
+                _LEGACY_YTDLP_PLUGIN_DIR.rmdir()
+                legacy_plugin_dir_removed = True
+            except OSError:
+                pass
+        except OSError:
+            pass
+
+    return removed_cache_dirs, auth_test_removed, legacy_plugin_dir_removed
+
+
+def cleanup_legacy_bgutil_once() -> bool:
+    """1.0.1 이전 실험용 bgutil 런타임을 LocalAppData에서 한 번 정리한다.
+
+    RR-V가 직접 만들었던 정확한 경로만 대상으로 삼는다. 삭제에 실패하면
+    마커를 남기지 않아 다음 실행 때 다시 시도한다.
+    """
+
+    if _LEGACY_BGUTIL_CLEANUP_MARKER.is_file():
+        return True
+
+    success = True
+    try:
+        if _LEGACY_BGUTIL_PROVIDER_DIR.exists():
+            shutil.rmtree(_LEGACY_BGUTIL_PROVIDER_DIR)
+    except OSError:
+        success = False
+
+    try:
+        if _LEGACY_BGUTIL_PLUGIN_PATH.is_file():
+            _LEGACY_BGUTIL_PLUGIN_PATH.unlink()
+    except OSError:
+        success = False
+
+    if not success:
+        return False
+
+    try:
+        _LEGACY_BGUTIL_CLEANUP_MARKER.write_text(
+            "RR-V 1.0.1 legacy bgutil runtime cleanup completed.\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        return False
+    return True
+
+
+def has_bundled_wpc_provider() -> bool:
+    """배포본에 WPC 브라우저 PO Token Provider 런타임이 있는지 확인한다."""
+
+    return (
+        (BUNDLED_WPC_RUNTIME_DIR / "yt_dlp_plugins" / "extractor" / "getpot_wpc.py").is_file()
+        and (BUNDLED_WPC_RUNTIME_DIR / "nodriver" / "__init__.py").is_file()
+    )
 
 
 def wpc_provider_runtime_ready() -> bool:
+    """yt-dlp가 WPC Provider를 바로 로드할 수 있는 상태인지 확인한다."""
+
     return (
         (RRV_WPC_RUNTIME_DIR / "yt_dlp_plugins" / "extractor" / "getpot_wpc.py").is_file()
         and (RRV_WPC_RUNTIME_DIR / "nodriver" / "__init__.py").is_file()
     )
+
+
+def bootstrap_runtime_wpc_provider() -> bool:
+    """번들된 WPC Provider를 LocalAppData에 배치한다."""
+
+    if not has_bundled_wpc_provider():
+        return False
+
+    RRV_WPC_PROVIDER_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        current_version = _WPC_PROVIDER_MARKER.read_text(encoding="utf-8").strip()
+    except OSError:
+        current_version = ""
+
+    needs_refresh = current_version != WPC_PROVIDER_VERSION or not wpc_provider_runtime_ready()
+    if not needs_refresh:
+        return True
+
+    try:
+        if RRV_WPC_RUNTIME_DIR.exists():
+            shutil.rmtree(RRV_WPC_RUNTIME_DIR)
+        shutil.copytree(BUNDLED_WPC_RUNTIME_DIR, RRV_WPC_RUNTIME_DIR)
+        _WPC_PROVIDER_MARKER.write_text(WPC_PROVIDER_VERSION + "\n", encoding="utf-8")
+    except OSError:
+        return False
+    return wpc_provider_runtime_ready()
+
+
+def restore_bundled_wpc_provider() -> bool:
+    """패키지에 포함된 WPC Provider 런타임으로 복구한다."""
+
+    if not has_bundled_wpc_provider():
+        return False
+    RRV_WPC_PROVIDER_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        if RRV_WPC_RUNTIME_DIR.exists():
+            shutil.rmtree(RRV_WPC_RUNTIME_DIR)
+        shutil.copytree(BUNDLED_WPC_RUNTIME_DIR, RRV_WPC_RUNTIME_DIR)
+        _WPC_PROVIDER_MARKER.write_text(WPC_PROVIDER_VERSION + "\n", encoding="utf-8")
+    except OSError:
+        return False
+    return wpc_provider_runtime_ready()
+
+def restore_bundled_tools() -> tuple[str, ...]:
+    """배포본에 포함된 기본 도구가 있으면 현재 도구를 그 버전으로 복구한다."""
+
+    RRV_TOOLS_DIR.mkdir(parents=True, exist_ok=True)
+    restored: list[str] = []
+    for name in _RUNTIME_TOOL_NAMES:
+        bundled = BUNDLED_TOOLS_DIR / name
+        if not bundled.is_file():
+            continue
+        try:
+            shutil.copy2(bundled, RRV_TOOLS_DIR / name)
+            restored.append(name)
+        except OSError:
+            continue
+
+    if restore_bundled_wpc_provider():
+        restored.append("YouTube 인증 런타임 (WPC)")
+
+    return tuple(restored)
+
+
+def has_bundled_tools() -> bool:
+    return (
+        any((BUNDLED_TOOLS_DIR / name).is_file() for name in _RUNTIME_TOOL_NAMES)
+        or has_bundled_wpc_provider()
+    )
+
+
+def find_executable(name: str) -> Path | None:
+    """RR-V 전용 도구 폴더에서만 실행 파일을 찾는다."""
+
+    candidate = RRV_TOOLS_DIR / name
+    return candidate if candidate.is_file() else None
