@@ -217,6 +217,13 @@ class ThemeSettingsPage(SettingsPage):
             self.component_check_button.setEnabled(True)
 
         if result.skipped:
+            if hasattr(self, "component_update_status"):
+                self.component_update_status.setText(
+                    "✓ 오늘 이미 자동 확인했습니다. 로컬 도구가 바뀌면 다음 실행에서 즉시 다시 확인합니다."
+                )
+                self.component_update_details.setText(
+                    "필요하면 '지금 업데이트 확인'을 눌러 최신 버전을 다시 확인할 수 있습니다."
+                )
             return
 
         if not result.components:
