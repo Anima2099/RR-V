@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import re
 
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
 from app.paths import (
-    DARK_ICONS_DIR,
+    RRV_LOCAL_DIR,
     WARM_SAGE_DARK_THEME_PATH,
     WARM_SAGE_THEME_PATH,
 )
@@ -17,6 +19,8 @@ THEME_LIGHT = "light"
 THEME_DARK = "dark"
 THEME_MODES = {THEME_LIGHT, THEME_DARK}
 THEME_SETTINGS_KEY = "appearance/theme"
+_DARK_ICON_COLOR = "#B6C0BA"
+_DARK_ICON_CACHE_DIR = RRV_LOCAL_DIR / "theme-icons"
 
 _ACTIVE_THEME_MODE: str | None = None
 
@@ -51,16 +55,34 @@ def active_theme_mode() -> str:
 
 
 def active_theme_path() -> Path:
+    # 별도 Dark QSS가 생겨도 그대로 사용할 수 있고, 현재는 검증된 Light QSS를
+    # 색상 변환기의 원본으로 사용한다.
     if active_theme_mode() == THEME_DARK and WARM_SAGE_DARK_THEME_PATH.is_file():
         return WARM_SAGE_DARK_THEME_PATH
     return WARM_SAGE_THEME_PATH
 
 
 def themed_icon_path(light_icon_path: Path) -> Path:
-    if active_theme_mode() != THEME_DARK:
+    if active_theme_mode() != THEME_DARK or light_icon_path.suffix.lower() != ".svg":
         return light_icon_path
-    candidate = DARK_ICONS_DIR / light_icon_path.name
-    return candidate if candidate.is_file() else light_icon_path
+
+    try:
+        source = light_icon_path.read_text(encoding="utf-8")
+        dark_source = re.sub(
+            r"#[0-9A-Fa-f]{6}",
+            _DARK_ICON_COLOR,
+            source,
+        )
+        _DARK_ICON_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        candidate = _DARK_ICON_CACHE_DIR / light_icon_path.name
+        expected = dark_source.encode("utf-8")
+        if not candidate.is_file() or candidate.read_bytes() != expected:
+            temporary = candidate.with_name(candidate.name + ".rrv-update")
+            temporary.write_bytes(expected)
+            os.replace(temporary, candidate)
+        return candidate
+    except OSError:
+        return light_icon_path
 
 
 def _activate_theme_icon_paths() -> None:
@@ -85,11 +107,8 @@ def _activate_theme_icon_paths() -> None:
     )
     for name in names:
         light_path = getattr(paths, name, None)
-        if not isinstance(light_path, Path):
-            continue
-        candidate = DARK_ICONS_DIR / light_path.name
-        if candidate.is_file():
-            setattr(paths, name, candidate)
+        if isinstance(light_path, Path):
+            setattr(paths, name, themed_icon_path(light_path))
 
 
 def apply_active_palette(app: QApplication) -> None:
