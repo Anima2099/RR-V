@@ -16,6 +16,12 @@ SUCCESS_TEXT = "#8DB596"
 ERROR_TEXT = "#D8877E"
 WARNING_TEXT = "#D0A96D"
 
+# Dark UI에서는 굵기만으로 제목과 보조 문장을 나누기 어렵기 때문에
+# 큰 제목/섹션 제목/본문에 명도 차이를 추가해 시각적 계층을 만든다.
+PAGE_TITLE_TEXT = "#F0F3EF"
+SECTION_TITLE_TEXT = "#E6ECE7"
+BODY_TEXT = "#A7B2AB"
+
 BG_MAIN = "#202723"
 BG_SIDEBAR = "#27302B"
 BG_INPUT = "#252D29"
@@ -252,6 +258,18 @@ def _map_color(property_name: str, color: str) -> str:
     return _map_text(color)
 
 
+def _set_selector_color(stylesheet: str, selector: str, color: str) -> str:
+    """특정 selector의 첫 color 속성만 바꿔 Dark 텍스트 계층을 미세 조정한다."""
+    pattern = rf"({re.escape(selector)}\s*\{{[^}}]*?\bcolor:\s*)#[0-9A-Fa-f]{{6}}"
+    return re.sub(
+        pattern,
+        lambda match: f"{match.group(1)}{color}",
+        stylesheet,
+        count=1,
+        flags=re.DOTALL,
+    )
+
+
 def build_dark_stylesheet(light_stylesheet: str) -> str:
     """검증된 Light QSS의 selector 구조를 유지한 채 Warm Sage Dark 색만 치환한다."""
     output: list[str] = []
@@ -293,4 +311,19 @@ def build_dark_stylesheet(light_stylesheet: str) -> str:
     }
     for before, after in replacements.items():
         dark = dark.replace(before, after)
+
+    # DEV1.1: Dark 배경에서는 굵기만으로 제목 계층이 약하게 느껴져
+    # 제목은 조금 더 밝게, 일반 설명은 살짝 낮춰 시선의 순서를 선명하게 한다.
+    hierarchy_colors = {
+        "QLabel#pageTitle": PAGE_TITLE_TEXT,
+        "QLabel#sectionTitle": SECTION_TITLE_TEXT,
+        "QLabel#emptyTitle": SECTION_TITLE_TEXT,
+        "QLabel#previewTitle": SECTION_TITLE_TEXT,
+        "QLabel#dialogTitle": SECTION_TITLE_TEXT,
+        "QLabel#taskTitle": SECTION_TITLE_TEXT,
+        "QLabel#bodyText": BODY_TEXT,
+    }
+    for selector, color in hierarchy_colors.items():
+        dark = _set_selector_color(dark, selector, color)
+
     return dark
