@@ -42,6 +42,7 @@ def save_theme_preference(mode: str) -> str:
 def initialize_active_theme() -> str:
     global _ACTIVE_THEME_MODE
     _ACTIVE_THEME_MODE = load_theme_preference()
+    _activate_theme_icon_paths()
     return _ACTIVE_THEME_MODE
 
 
@@ -62,6 +63,35 @@ def themed_icon_path(light_icon_path: Path) -> Path:
     return candidate if candidate.is_file() else light_icon_path
 
 
+def _activate_theme_icon_paths() -> None:
+    """UI 모듈이 import되기 전에 app.paths의 SVG 경로를 현재 테마에 맞춘다."""
+    if active_theme_mode() != THEME_DARK:
+        return
+
+    import app.paths as paths
+
+    names = (
+        "EXPAND_ICON_PATH",
+        "COLLAPSE_ICON_PATH",
+        "DRAG_ICON_PATH",
+        "RETRY_ICON_PATH",
+        "COPY_ICON_PATH",
+        "MORE_ICON_PATH",
+        "CLOSE_ICON_PATH",
+        "STOP_ICON_PATH",
+        "FOLDER_ICON_PATH",
+        "SPIN_UP_ICON_PATH",
+        "SPIN_DOWN_ICON_PATH",
+    )
+    for name in names:
+        light_path = getattr(paths, name, None)
+        if not isinstance(light_path, Path):
+            continue
+        candidate = DARK_ICONS_DIR / light_path.name
+        if candidate.is_file():
+            setattr(paths, name, candidate)
+
+
 def apply_active_palette(app: QApplication) -> None:
     if active_theme_mode() != THEME_DARK:
         return
@@ -80,7 +110,19 @@ def apply_active_palette(app: QApplication) -> None:
     palette.setColor(QPalette.ColorRole.Highlight, QColor("#7EA2B3"))
     palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#202723"))
     palette.setColor(QPalette.ColorRole.PlaceholderText, QColor("#98A49D"))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor("#8C9891"))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor("#8C9891"))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor("#8C9891"))
+    palette.setColor(
+        QPalette.ColorGroup.Disabled,
+        QPalette.ColorRole.WindowText,
+        QColor("#8C9891"),
+    )
+    palette.setColor(
+        QPalette.ColorGroup.Disabled,
+        QPalette.ColorRole.Text,
+        QColor("#8C9891"),
+    )
+    palette.setColor(
+        QPalette.ColorGroup.Disabled,
+        QPalette.ColorRole.ButtonText,
+        QColor("#8C9891"),
+    )
     app.setPalette(palette)
