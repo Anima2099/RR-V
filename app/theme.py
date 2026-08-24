@@ -7,11 +7,7 @@ import re
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 
-from app.paths import (
-    RRV_LOCAL_DIR,
-    WARM_SAGE_DARK_THEME_PATH,
-    WARM_SAGE_THEME_PATH,
-)
+from app.paths import RRV_LOCAL_DIR, WARM_SAGE_THEME_PATH
 from app.settings_store import get_settings
 
 
@@ -55,10 +51,7 @@ def active_theme_mode() -> str:
 
 
 def active_theme_path() -> Path:
-    # 별도 Dark QSS가 생겨도 그대로 사용할 수 있고, 현재는 검증된 Light QSS를
-    # 색상 변환기의 원본으로 사용한다.
-    if active_theme_mode() == THEME_DARK and WARM_SAGE_DARK_THEME_PATH.is_file():
-        return WARM_SAGE_DARK_THEME_PATH
+    # Light QSS를 유일한 selector 기준본으로 유지하고 Dark는 실행 시 색상만 변환한다.
     return WARM_SAGE_THEME_PATH
 
 
