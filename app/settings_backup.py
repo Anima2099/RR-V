@@ -130,7 +130,7 @@ def reset_scope(scope: str) -> int:
     keys = settings.allKeys()
 
     if scope == "ui":
-        prefixes = ("window/", "batch_add/")
+        prefixes = ("window/", "batch_add/", "appearance/")
     elif scope == "media":
         prefixes = ("converter/", "thumbnail/", "snapshot/", "subtitle/")
     elif scope == "downloads":
