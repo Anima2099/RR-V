@@ -25,7 +25,6 @@ from services.windows_startup_service import (
 )
 from services.browser_integration_service import sync_browser_integration_registration
 from ui.dialogs.warm_dialogs import show_warm_message
-from ui.main_window import MainWindow
 
 
 def _prepare_windowed_stdio() -> None:
@@ -91,6 +90,9 @@ def main() -> int:
             )
         except WindowsStartupError as error:
             print(f"RR-V Windows startup registration sync failed: {error}")
+
+    # 테마 선택과 Dark SVG 경로를 먼저 확정한 뒤 UI 모듈을 불러온다.
+    from ui.main_window import MainWindow
 
     window = MainWindow()
     external_service.request_received.connect(window.handle_external_request)
