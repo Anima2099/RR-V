@@ -19,6 +19,7 @@ FFMPEG_GYAN_PAGE = "https://www.gyan.dev/ffmpeg/builds/"
 
 _UPDATE_CHECK_INTERVAL_SECONDS = 24 * 60 * 60
 _LAST_CHECK_KEY = "updates/last_component_check_epoch"
+_LAST_LOCAL_SIGNATURE_KEY = "updates/last_component_local_signature"
 
 _YTDLP_VERSION_RE = re.compile(r"\d{4}\.\d{2}\.\d{2}(?:\.\d{6})?")
 _FFMPEG_GIT_VERSION_RE = re.compile(
@@ -72,13 +73,25 @@ def _read_last_check_epoch() -> float:
         return 0.0
 
 
-def _mark_check_attempt() -> None:
+def _read_last_local_signature() -> str:
+    settings = get_settings()
+    return str(settings.value(_LAST_LOCAL_SIGNATURE_KEY, "") or "").strip()
+
+
+def _mark_check_attempt(local_signature: str) -> None:
     settings = get_settings()
     settings.setValue(_LAST_CHECK_KEY, time.time())
+    settings.setValue(_LAST_LOCAL_SIGNATURE_KEY, local_signature)
     settings.sync()
 
 
-def update_check_due() -> bool:
+def update_check_due(local_signature: str) -> bool:
+    # 하루 안에 이미 확인했더라도 사용자가 yt-dlp/FFmpeg/FFprobe 파일을 직접
+    # 교체했다면 즉시 다시 확인한다. 도구 교체를 '오늘 이미 확인함' 캐시가
+    # 가리는 일을 막는다.
+    if local_signature != _read_last_local_signature():
+        return True
+
     last_check = _read_last_check_epoch()
     if last_check <= 0:
         return True
@@ -101,6 +114,18 @@ def _fetch_text(url: str, *, accept: str = "text/plain") -> str:
 
 def _installed_versions() -> dict[str, str]:
     return {status.key: status.version for status in inspect_tools()}
+
+
+def _local_signature(installed: dict[str, str]) -> str:
+    # FFmpeg와 FFprobe는 한 쌍으로 관리하므로 둘 중 하나만 달라져도 새 로컬
+    # 구성으로 본다. Deno는 이번 자동 확인 대상이 아니므로 제외한다.
+    return "|".join(
+        (
+            installed.get("ytdlp", "없음"),
+            installed.get("ffmpeg", "없음"),
+            installed.get("ffprobe", "없음"),
+        )
+    )
 
 
 def _normalize_ytdlp_version(value: str) -> str:
@@ -182,15 +207,17 @@ def _check_ffmpeg(current: str) -> ComponentVersionCheck:
 
 
 def check_component_updates(*, force: bool = False) -> ComponentUpdateCheckResult:
-    if not force and not update_check_due():
+    installed = _installed_versions()
+    local_signature = _local_signature(installed)
+
+    if not force and not update_check_due(local_signature):
         return ComponentUpdateCheckResult(components=(), skipped=True)
 
-    installed = _installed_versions()
     try:
         ytdlp = _check_ytdlp(installed.get("ytdlp", "없음"))
         ffmpeg = _check_ffmpeg(installed.get("ffmpeg", "없음"))
         return ComponentUpdateCheckResult(components=(ytdlp, ffmpeg))
     finally:
         # 인터넷이 끊겨 있어도 실행할 때마다 같은 서버를 반복해서 두드리지 않는다.
-        # 사용자는 설정 화면의 '지금 업데이트 확인'으로 언제든 강제 재확인할 수 있다.
-        _mark_check_attempt()
+        # 단, 로컬 도구 버전이 바뀌면 24시간 안이어도 다음 실행에서 즉시 재확인한다.
+        _mark_check_attempt(local_signature)
