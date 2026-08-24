@@ -69,6 +69,16 @@ class MainWindow(QMainWindow):
         self._apply_tray_preferences()
         self.restore_window_state()
 
+        # 메인 UI 생성과 복원 작업을 먼저 끝낸 뒤 구성요소 버전을 확인한다.
+        # 네트워크가 느리거나 끊겨도 RR-V 시작 자체는 지연되지 않는다.
+        QTimer.singleShot(
+            1400,
+            lambda: self.settings_page.start_component_update_check(
+                force=False,
+                notify=True,
+            ),
+        )
+
     def _create_tray_icon(self) -> None:
         self.tray_icon = QSystemTrayIcon(self)
         application = QApplication.instance()
