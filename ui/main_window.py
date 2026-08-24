@@ -48,6 +48,9 @@ class MainWindow(QMainWindow):
         self.settings_page.general_preferences_saved.connect(
             self._apply_tray_preferences
         )
+        self.settings_page.open_tools_requested.connect(
+            self._open_tools_and_updates
+        )
         self.pages.addWidget(self.download_page)
         self.pages.addWidget(self.media_tools_page)
         self.pages.addWidget(self.settings_page)
@@ -130,6 +133,11 @@ class MainWindow(QMainWindow):
 
     def _open_page_from_tray(self, page_index: int) -> None:
         self.show_page(page_index)
+        self._activate_existing_window()
+
+    def _open_tools_and_updates(self) -> None:
+        self.show_page(2)
+        self.settings_page.show_settings_tab(self.settings_page.TOOLS_TAB)
         self._activate_existing_window()
 
     def _tray_available(self) -> bool:
