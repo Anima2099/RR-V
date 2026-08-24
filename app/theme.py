@@ -1,0 +1,86 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from PySide6.QtGui import QColor, QPalette
+from PySide6.QtWidgets import QApplication
+
+from app.paths import (
+    DARK_ICONS_DIR,
+    WARM_SAGE_DARK_THEME_PATH,
+    WARM_SAGE_THEME_PATH,
+)
+from app.settings_store import get_settings
+
+
+THEME_LIGHT = "light"
+THEME_DARK = "dark"
+THEME_MODES = {THEME_LIGHT, THEME_DARK}
+THEME_SETTINGS_KEY = "appearance/theme"
+
+_ACTIVE_THEME_MODE: str | None = None
+
+
+def _normalize_theme_mode(value: object) -> str:
+    mode = str(value or "").strip().lower()
+    return mode if mode in THEME_MODES else THEME_LIGHT
+
+
+def load_theme_preference() -> str:
+    settings = get_settings()
+    return _normalize_theme_mode(settings.value(THEME_SETTINGS_KEY, THEME_LIGHT))
+
+
+def save_theme_preference(mode: str) -> str:
+    normalized = _normalize_theme_mode(mode)
+    settings = get_settings()
+    settings.setValue(THEME_SETTINGS_KEY, normalized)
+    settings.sync()
+    return normalized
+
+
+def initialize_active_theme() -> str:
+    global _ACTIVE_THEME_MODE
+    _ACTIVE_THEME_MODE = load_theme_preference()
+    return _ACTIVE_THEME_MODE
+
+
+def active_theme_mode() -> str:
+    return _ACTIVE_THEME_MODE or THEME_LIGHT
+
+
+def active_theme_path() -> Path:
+    if active_theme_mode() == THEME_DARK and WARM_SAGE_DARK_THEME_PATH.is_file():
+        return WARM_SAGE_DARK_THEME_PATH
+    return WARM_SAGE_THEME_PATH
+
+
+def themed_icon_path(light_icon_path: Path) -> Path:
+    if active_theme_mode() != THEME_DARK:
+        return light_icon_path
+    candidate = DARK_ICONS_DIR / light_icon_path.name
+    return candidate if candidate.is_file() else light_icon_path
+
+
+def apply_active_palette(app: QApplication) -> None:
+    if active_theme_mode() != THEME_DARK:
+        return
+
+    palette = QPalette(app.palette())
+    palette.setColor(QPalette.ColorRole.Window, QColor("#202723"))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor("#E2E7E3"))
+    palette.setColor(QPalette.ColorRole.Base, QColor("#252D29"))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#323B36"))
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#323B36"))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#E2E7E3"))
+    palette.setColor(QPalette.ColorRole.Text, QColor("#E2E7E3"))
+    palette.setColor(QPalette.ColorRole.Button, QColor("#323B36"))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor("#E2E7E3"))
+    palette.setColor(QPalette.ColorRole.BrightText, QColor("#F7FAF8"))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor("#7EA2B3"))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#202723"))
+    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor("#98A49D"))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor("#8C9891"))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor("#8C9891"))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor("#8C9891"))
+    app.setPalette(palette)
