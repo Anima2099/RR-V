@@ -30,6 +30,7 @@ RR-V 1.2.0 uses a PyInstaller **onedir** layout.
 dist/RR-V/
   RR-V.exe
   RR-V-Auth-Helper.exe
+  LICENSE.txt
   THIRD_PARTY_NOTICES.txt
   SOURCE_OFFER.txt
   licenses/
