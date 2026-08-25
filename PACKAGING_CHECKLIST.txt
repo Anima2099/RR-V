@@ -9,6 +9,7 @@ Before build
 [ ] app\constants.py shows APP_VERSION = "1.2.0"
 [ ] RR-V.version_info.txt shows FileVersion/ProductVersion 1.2.0
 [ ] resources\icons\RR-V.ico and RR-V.png are the intended release icons
+[ ] LICENSE contains RR-V Source Available License 1.0
 [ ] auth_helper\main.py, auth_helper\README.md and auth_helper\LICENSE_NOTICE.txt are present
 [ ] RR-V-Auth-Helper.spec is present
 [ ] THIRD_PARTY_NOTICES.txt and SOURCE_OFFER.txt are present
@@ -43,14 +44,15 @@ BUILD_RELEASE.ps1 performs:
   1. Build RR-V-Auth-Helper.exe as a separate process component
   2. Build RR-V as PyInstaller onedir
   3. Copy RR-V-Auth-Helper.exe beside RR-V.exe
-  4. Collect third-party notices, source offer, Python/PySide/WPC license metadata,
-     and RR-V Auth Helper source into the release
+  4. Collect the RR-V core license, third-party notices, source offer,
+     Python/PySide/WPC license metadata, and RR-V Auth Helper source into the release
   5. Verify required release files and confirm yt-dlp / FFmpeg / FFprobe / Deno
      were not bundled accidentally
 
 Expected output
   dist\RR-V\RR-V.exe
   dist\RR-V\RR-V-Auth-Helper.exe
+  dist\RR-V\LICENSE.txt
   dist\RR-V\THIRD_PARTY_NOTICES.txt
   dist\RR-V\SOURCE_OFFER.txt
   dist\RR-V\licenses\BUILD_LICENSE_MANIFEST.txt
@@ -66,6 +68,7 @@ Post-build source safety
 [ ] Only build/, dist/, and temporary helper build output were created/replaced by packaging
 
 License package verification
+[ ] LICENSE.txt opens and contains RR-V Source Available License 1.0
 [ ] THIRD_PARTY_NOTICES.txt opens and lists bundled vs runtime-downloaded components
 [ ] SOURCE_OFFER.txt opens and contains the source request contact
 [ ] licenses\BUILD_LICENSE_MANIFEST.txt records the exact Python/PySide6/PyInstaller build versions
@@ -74,6 +77,7 @@ License package verification
 [ ] licenses\WPC-runtime contains the exact locked wheel METADATA and available LICENSE/COPYING/NOTICE files
 [ ] licenses\RR-V-Auth-Helper-source contains main.py, README.md, LICENSE_NOTICE.txt, and RR-V-Auth-Helper.spec
 [ ] The bundled WPC runtime still contains the nodriver and modified yt-dlp-getpot-wpc Python sources
+[ ] Program Information > RR-V license opens LICENSE.txt
 [ ] Program Information > Third-party license notice opens THIRD_PARTY_NOTICES.txt
 [ ] Program Information > Source availability opens SOURCE_OFFER.txt
 
@@ -139,6 +143,7 @@ Runtime storage
 [ ] %APPDATA%\RR-V stores settings / logs / backups / queue normally
 
 License / distribution boundary
+[ ] RR-V core release includes LICENSE.txt with RR-V Source Available License 1.0
 [ ] RR-V core does not import nodriver directly
 [ ] RR-V core communicates with RR-V Auth Helper only through the documented process/JSON-lines boundary
 [ ] RR-V Auth Helper is identified as AGPL-3.0-only and its preferred source is shipped with the release
