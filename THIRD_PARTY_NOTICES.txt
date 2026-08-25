@@ -1,0 +1,157 @@
+RR-V 1.2.0 - THIRD-PARTY NOTICES
+=================================
+
+This document identifies third-party software used by RR-V 1.2.0 and explains
+whether each component is bundled with RR-V or downloaded separately after
+installation.
+
+This notice does not change the license of the RR-V core application. Unless a
+file or directory states otherwise, the RR-V core source code and original
+assets are not offered under an open-source redistribution license.
+
+
+1. COMPONENTS BUNDLED WITH RR-V
+-------------------------------
+
+Python runtime
+  Component: CPython 3.14.x runtime used for the release build
+  License: Python Software Foundation License Version 2 (PSF-2.0)
+  Project: https://www.python.org/
+  Source: https://github.com/python/cpython
+  Notes: The exact Python build version and copied license file are recorded in
+         the release licenses directory by BUILD_RELEASE.ps1.
+
+PySide6 / Qt for Python
+  Components: PySide6, PySide6_Addons, PySide6_Essentials, shiboken6
+  Version: 6.11.1
+  License options published by Qt: LGPL-3.0 / GPL-3.0 / commercial
+  RR-V distribution basis: LGPL-3.0-compatible use of the applicable Qt/PySide6
+                         libraries.
+  Project: https://doc.qt.io/qtforpython-6/
+  Source: https://code.qt.io/cgit/pyside/pyside-setup.git/
+  Qt source: https://code.qt.io/cgit/qt/
+  Notes: RR-V uses an onedir layout so the Qt shared libraries remain separate
+         files. Package license metadata and available Qt/PySide license files
+         are copied into the release licenses directory during the build.
+
+RR-V Auth Helper
+  Component: RR-V-Auth-Helper.exe and auth_helper source
+  License: GNU Affero General Public License v3.0 only (AGPL-3.0-only)
+  Copyright: Anima2099 for RR-V-specific helper code; third-party portions retain
+             their respective copyrights.
+  Source: auth_helper/ in the RR-V source tree and in the release license/source
+          package.
+  Notes: The Auth Helper is a separate process. RR-V core communicates with it
+         through a small JSON-lines process protocol. The helper loads nodriver
+         only inside the helper process.
+
+YouTube WPC / browser-authentication runtime
+  The following locked runtime is bundled as Python source plus wheel metadata:
+
+  yt-dlp-getpot-wpc 1.1.2
+    License: MIT
+    Project: https://github.com/coletdjnz/yt-dlp-getpot-wpc
+    RR-V modification: PREP_WPC_PROVIDER.ps1 inserts a small portable sys.path
+                       bootstrap so the plugin can locate the isolated runtime.
+                       The modified source is included in the distributed runtime.
+
+  nodriver 0.50.3
+    License: GNU Affero General Public License v3.0 (AGPL-3.0)
+    Project: https://github.com/ultrafunkamsterdam/nodriver
+    Source: Included in RR-V's bundled WPC runtime as Python source.
+
+  mss 10.2.0
+    License: MIT
+    Project: https://github.com/BoboTiG/python-mss
+
+  websockets 16.1.1
+    License: BSD 3-Clause
+    Project: https://github.com/python-websockets/websockets
+
+  Deprecated 1.3.1
+    License: MIT
+    Project: https://github.com/tantale/deprecated
+
+  wrapt 2.3.0
+    License: BSD 2-Clause
+    Project: https://github.com/GrahamDumpleton/wrapt
+
+  Notes: RR-V bundles the complete prepared WPC runtime directory, including the
+         Python sources and *.dist-info metadata. BUILD_RELEASE.ps1 additionally
+         collects available LICENSE/COPYING/NOTICE files and METADATA into the
+         release licenses directory.
+
+
+2. COMPONENTS NOT BUNDLED IN THE RR-V INSTALLER
+------------------------------------------------
+
+Starting with RR-V 1.2.0, the following external executables are intentionally
+not included in the RR-V onedir package or Installer. When the user chooses to
+install required components, RR-V downloads them from their official distribution
+sources into the user's LocalAppData RR-V tools directory.
+
+yt-dlp Nightly Windows executable
+  Project: https://github.com/yt-dlp/yt-dlp
+  RR-V download channel: https://github.com/yt-dlp/yt-dlp-nightly-builds/releases
+  Licensing note: yt-dlp source is released under the Unlicense, while the
+                  official PyInstaller-bundled executable contains third-party
+                  GPLv3+ code and the combined executable is distributed under
+                  GPLv3+ terms according to the yt-dlp project.
+
+FFmpeg / FFprobe - Gyan Release Essentials
+  Project: https://ffmpeg.org/
+  RR-V download channel: https://www.gyan.dev/ffmpeg/builds/#release-builds
+  License of the Gyan static builds used by RR-V: GPLv3
+  Source information: Gyan publishes the corresponding FFmpeg source commit for
+                      each build on its builds page.
+
+Deno
+  Project: https://github.com/denoland/deno
+  RR-V download channel: https://github.com/denoland/deno/releases
+  License: MIT
+
+These components remain third-party software and are governed by their own
+licenses after download. RR-V does not relicense them.
+
+
+3. BUILD TOOLING
+----------------
+
+PyInstaller is used to create the RR-V and RR-V Auth Helper executables.
+PyInstaller's licensing exception permits generated application bundles to be
+shipped under licenses selected by the application author, subject to the
+licenses of bundled dependencies. PyInstaller itself is not presented as part
+of the RR-V application source license.
+
+Project: https://pyinstaller.org/
+
+
+4. SOURCE AVAILABILITY AND LICENSE COPIES
+-----------------------------------------
+
+The RR-V release directory contains a licenses folder generated by
+BUILD_RELEASE.ps1. It is intended to contain:
+
+  - the Python license used by the release interpreter;
+  - PySide6 / Qt / shiboken package license and metadata files available from the
+    exact installed packages used for the build;
+  - license and metadata files from the exact locked WPC runtime wheels;
+  - RR-V Auth Helper source code;
+  - SOURCE_OFFER.txt.
+
+The bundled nodriver and yt-dlp-getpot-wpc Python sources are also present inside
+RR-V's WPC runtime itself.
+
+For source-code requests concerning LGPL/AGPL-covered components distributed by
+RR-V, see SOURCE_OFFER.txt or contact:
+
+  Anima2099
+  anima2099@proton.me
+
+
+5. NO WARRANTY FROM THIRD-PARTY AUTHORS
+---------------------------------------
+
+Third-party components are provided under their respective licenses and warranty
+disclaimers. The names of third-party projects or authors do not imply endorsement
+of RR-V.
