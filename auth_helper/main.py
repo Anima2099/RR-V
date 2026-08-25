@@ -121,7 +121,10 @@ class RECT(ctypes.Structure):
 
 
 def _emit(payload: dict[str, object]) -> None:
-    print(json.dumps(payload, ensure_ascii=False), flush=True)
+    # Keep stdout ASCII-only so the frozen helper is independent of the
+    # Windows console/code-page choice. json.loads() in RR-V restores the
+    # escaped Korean text after the process boundary.
+    print(json.dumps(payload, ensure_ascii=True), flush=True)
 
 
 def _emit_status(message: str) -> None:
