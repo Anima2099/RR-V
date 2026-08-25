@@ -305,7 +305,7 @@ class CommunitySettingsPage(ThemeSettingsPage):
         browser_buttons.setSpacing(8)
         if self._browser_extension_browsers:
             for browser in self._browser_extension_browsers:
-                button = QPushButton(f"{browser.label} 확장 관리 열기")
+                button = QPushButton(f"{browser.label} 열기 + 관리 주소 복사")
                 button.setObjectName("secondaryButton")
                 button.clicked.connect(
                     lambda checked=False, key=browser.key: self._open_browser_extension_manager(key)
@@ -317,6 +317,19 @@ class CommunitySettingsPage(ThemeSettingsPage):
             missing.setObjectName("mutedText")
             browser_buttons.addWidget(missing)
         guide_layout.addLayout(browser_buttons)
+
+        manager_hint = QLabel(
+            "버튼을 누르면 브라우저를 열고 확장 관리 주소를 클립보드에 복사합니다. "
+            "브라우저 주소창에 붙여넣고 Enter를 눌러 주세요."
+        )
+        manager_hint.setObjectName("mutedText")
+        manager_hint.setWordWrap(True)
+        guide_layout.addWidget(manager_hint)
+
+        self.browser_manager_copy_status = QLabel("")
+        self.browser_manager_copy_status.setObjectName("settingsSavedStatus")
+        self.browser_manager_copy_status.setWordWrap(True)
+        guide_layout.addWidget(self.browser_manager_copy_status)
 
         for text in (
             "2. 확장 관리 화면에서 '개발자 모드'를 켭니다.",
@@ -472,14 +485,29 @@ class CommunitySettingsPage(ThemeSettingsPage):
             return
 
         target = "chrome://extensions/" if browser.key == "chrome" else "edge://extensions/"
+        QApplication.clipboard().setText(target)
+
         try:
-            subprocess.Popen([str(browser.path), target])
+            subprocess.Popen([str(browser.path)])
         except OSError as error:
+            self.browser_manager_copy_status.setText(
+                f"✓ {target} 복사됨 · {browser.label}는 직접 열어 주세요."
+            )
             show_warm_message(
                 self,
-                "확장 관리 화면",
-                f"{browser.label} 확장 관리 화면을 열지 못했습니다.\n{error}",
+                "브라우저 열기",
+                f"확장 관리 주소는 클립보드에 복사했습니다.\n"
+                f"{browser.label}는 직접 열어 주소창에 붙여넣어 주세요.\n\n{error}",
             )
+            return
+
+        self.browser_manager_copy_status.setText(
+            f"✓ {target} 복사됨 · 주소창에 붙여넣고 Enter를 눌러 주세요."
+        )
+        QTimer.singleShot(
+            3600,
+            lambda: self.browser_manager_copy_status.setText(""),
+        )
 
     def _copy_browser_extension_path(self) -> None:
         bootstrap_browser_extension()
