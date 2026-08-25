@@ -45,17 +45,20 @@ def _windows_curl() -> Path | None:
     if sys.platform != "win32":
         return None
 
-    discovered = shutil.which("curl.exe")
-    if discovered:
-        path = Path(discovered)
-        if path.is_file():
-            return path
-
+    # 다운로드할 실행 파일을 다루는 경로이므로 PATH보다 Windows가 제공하는
+    # System32 curl.exe를 우선한다. PATH 검색은 시스템 파일을 찾지 못한 경우의
+    # 마지막 호환성 폴백으로만 사용한다.
     system_root = os.environ.get("SystemRoot", "").strip()
     if system_root:
         candidate = Path(system_root) / "System32" / "curl.exe"
         if candidate.is_file():
             return candidate
+
+    discovered = shutil.which("curl.exe")
+    if discovered:
+        path = Path(discovered)
+        if path.is_file():
+            return path
     return None
 
 
