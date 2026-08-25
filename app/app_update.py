@@ -4,9 +4,9 @@ from dataclasses import dataclass
 import json
 import re
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 from app.constants import APP_VERSION
+from app.http_client import fetch_https_bytes
 
 
 RELEASES_API_URL = "https://api.github.com/repos/Anima2099/RR-V/releases?per_page=20"
@@ -35,17 +35,18 @@ def _display_version(tag_name: str) -> str:
 
 
 def check_app_update(timeout: float = 8.0) -> AppUpdateResult:
-    request = Request(
-        RELEASES_API_URL,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": f"RR-V/{APP_VERSION}",
-        },
-    )
-
     try:
-        with urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        payload = json.loads(
+            fetch_https_bytes(
+                RELEASES_API_URL,
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "User-Agent": f"RR-V/{APP_VERSION}",
+                },
+                timeout=timeout,
+                max_bytes=2 * 1024 * 1024,
+            ).decode("utf-8")
+        )
     except HTTPError as error:
         if error.code == 404:
             message = "공개 릴리스 정보를 아직 확인할 수 없습니다."
@@ -54,7 +55,7 @@ def check_app_update(timeout: float = 8.0) -> AppUpdateResult:
         else:
             message = f"GitHub 릴리스 정보를 확인하지 못했습니다. (HTTP {error.code})"
         return AppUpdateResult(APP_VERSION, "확인 실패", False, RELEASES_PAGE_URL, message)
-    except (URLError, TimeoutError, OSError, json.JSONDecodeError):
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError, ValueError):
         return AppUpdateResult(
             APP_VERSION,
             "확인 실패",
