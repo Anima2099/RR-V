@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -111,6 +112,14 @@ def run_auth_helper(
         else 0
     )
 
+    # The helper speaks newline-delimited JSON over stdout. On Korean Windows,
+    # a child Python process connected to a pipe may otherwise choose CP949 for
+    # stdout while RR-V correctly expects UTF-8. Force one encoding on both ends
+    # so Korean status messages survive the process boundary unchanged.
+    helper_env = os.environ.copy()
+    helper_env["PYTHONIOENCODING"] = "utf-8"
+    helper_env["PYTHONUTF8"] = "1"
+
     try:
         process = subprocess.Popen(
             command,
@@ -121,6 +130,7 @@ def run_auth_helper(
             errors="replace",
             bufsize=1,
             creationflags=creation_flags,
+            env=helper_env,
         )
     except OSError as error:
         return AuthHelperResult(
