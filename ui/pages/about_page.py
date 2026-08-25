@@ -97,10 +97,17 @@ class AboutPage(QWidget):
         description.setWordWrap(True)
 
         license_hint = QLabel(
-            "RR-V에 포함되거나 연결되는 제3자 구성요소의 라이선스와 소스 제공 안내"
+            "RR-V 본체와 제3자 구성요소의 라이선스 및 소스 제공 안내"
         )
         license_hint.setObjectName("mutedText")
         license_hint.setWordWrap(True)
+
+        core_license_button = QPushButton("RR-V 라이선스")
+        core_license_button.setObjectName("secondaryButton")
+        core_license_button.setFixedHeight(30)
+        core_license_button.clicked.connect(
+            lambda: self._open_distribution_file("LICENSE.txt" if getattr(sys, "frozen", False) else "LICENSE")
+        )
 
         notices_button = QPushButton("제3자 라이선스")
         notices_button.setObjectName("secondaryButton")
@@ -118,6 +125,7 @@ class AboutPage(QWidget):
 
         license_row = QHBoxLayout()
         license_row.setSpacing(6)
+        license_row.addWidget(core_license_button)
         license_row.addWidget(notices_button)
         license_row.addWidget(source_button)
         license_row.addStretch()
