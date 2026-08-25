@@ -16,6 +16,8 @@ under:
 
   licenses\RR-V-Auth-Helper-source\
 
+That directory also contains a complete AGPL-3.0 license copy.
+
 The nodriver 0.50.3 source used by the helper is distributed as Python source in
 the bundled RR-V WPC runtime. The yt-dlp-getpot-wpc source and RR-V's small
 bootstrap modification are also distributed in that runtime.
@@ -31,13 +33,17 @@ available from:
 RR-V 1.2.0 uses PySide6 / Qt for Python 6.11.1 under the applicable LGPL v3
 terms for the Qt/PySide libraries used by RR-V.
 
-Official source repositories:
+Exact upstream source tags corresponding to the release version are available at:
 
-  Qt for Python / PySide:
-  https://code.qt.io/cgit/pyside/pyside-setup.git/
+  Qt for Python / PySide 6.11.1:
+  https://github.com/pyside/pyside-setup/tree/v6.11.1
 
-  Qt:
-  https://code.qt.io/cgit/qt/
+  Qt Base 6.11.1:
+  https://github.com/qt/qtbase/tree/v6.11.1
+
+The RR-V release also includes complete LGPL-3.0 and GPL-3.0 license texts under:
+
+  licenses\PySide6-Qt\OpenSource-License-Texts\
 
 For at least three years after the last distribution of an RR-V release that
 contains these LGPL-covered binaries, Anima2099 will provide the corresponding
@@ -57,6 +63,8 @@ RR-V uses an onedir distribution layout. Qt shared-library files remain separate
 from RR-V.exe rather than being statically linked into it. Recipients may replace
 the applicable shared Qt libraries with compatible modified versions, subject to
 the requirements and compatibility constraints of the LGPL and Qt components.
+RR-V does not prohibit reverse engineering for the purpose of debugging such
+modifications where the LGPL requires that permission.
 
 3. LICENSE COPIES AND BUILD METADATA
 ------------------------------------
