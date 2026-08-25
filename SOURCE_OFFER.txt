@@ -1,0 +1,69 @@
+RR-V 1.2.0 - SOURCE AVAILABILITY / WRITTEN OFFER
+=================================================
+
+RR-V distributes several third-party components under open-source licenses.
+This file explains how recipients can obtain source code corresponding to the
+LGPL/AGPL-covered components included with an RR-V release.
+
+1. RR-V AUTH HELPER AND AGPL COMPONENTS
+---------------------------------------
+
+RR-V Auth Helper is distributed under the GNU Affero General Public License
+version 3.0 only (AGPL-3.0-only).
+
+The preferred source form of the RR-V Auth Helper is included with the release
+under:
+
+  licenses\RR-V-Auth-Helper-source\
+
+The nodriver 0.50.3 source used by the helper is distributed as Python source in
+the bundled RR-V WPC runtime. The yt-dlp-getpot-wpc source and RR-V's small
+bootstrap modification are also distributed in that runtime.
+
+When the RR-V repository is public, the same RR-V Auth Helper source is also
+available from:
+
+  https://github.com/Anima2099/RR-V
+
+2. PYSIDE6 / QT LGPL SOURCE
+---------------------------
+
+RR-V 1.2.0 uses PySide6 / Qt for Python 6.11.1 under the applicable LGPL v3
+terms for the Qt/PySide libraries used by RR-V.
+
+Official source repositories:
+
+  Qt for Python / PySide:
+  https://code.qt.io/cgit/pyside/pyside-setup.git/
+
+  Qt:
+  https://code.qt.io/cgit/qt/
+
+For at least three years after the last distribution of an RR-V release that
+contains these LGPL-covered binaries, Anima2099 will provide the corresponding
+source code for the LGPL-covered Qt/PySide components used by that release upon
+request, at no charge for network delivery and otherwise for no more than the
+reasonable cost of physically providing the source.
+
+Request contact:
+
+  anima2099@proton.me
+
+Please identify the RR-V version and, if available, the BUILD_LICENSE_MANIFEST.txt
+information from your installation so the matching source version can be
+provided.
+
+RR-V uses an onedir distribution layout. Qt shared-library files remain separate
+from RR-V.exe rather than being statically linked into it. Recipients may replace
+the applicable shared Qt libraries with compatible modified versions, subject to
+the requirements and compatibility constraints of the LGPL and Qt components.
+
+3. LICENSE COPIES AND BUILD METADATA
+------------------------------------
+
+BUILD_RELEASE.ps1 creates a licenses directory in the RR-V release output and
+copies available license/metadata files from the exact Python, PySide6, shiboken6,
+and WPC runtime packages used for that build. It also writes a build license
+manifest with the exact interpreter/package versions used for the release.
+
+For the component list and official project links, see THIRD_PARTY_NOTICES.txt.
