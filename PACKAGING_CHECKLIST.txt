@@ -9,11 +9,14 @@ Before build
 [ ] app\constants.py shows APP_VERSION = "1.2.0"
 [ ] RR-V.version_info.txt shows FileVersion/ProductVersion 1.2.0
 [ ] resources\icons\RR-V.ico and RR-V.png are the intended release icons
-[ ] auth_helper\main.py and RR-V-Auth-Helper.spec are present
+[ ] auth_helper\main.py, auth_helper\README.md and auth_helper\LICENSE_NOTICE.txt are present
+[ ] RR-V-Auth-Helper.spec is present
+[ ] THIRD_PARTY_NOTICES.txt and SOURCE_OFFER.txt are present
 [ ] resources\wpc-provider\runtime contains WPC and nodriver
 [ ] resources\wpc-provider\WPC_RUNTIME_LOCK.txt is present and keeps the regression-tested dependency set
-[ ] The intended Python virtual environment is active in VS Code
+[ ] .venv contains the pinned PySide6 6.11.1 packages from requirements.txt
 [ ] PyInstaller is installed in the release virtual environment
+[ ] RR-V and RR-V-Auth-Helper are completely stopped, including the system tray
 
 External runtime tool policy (1.2.0+)
 [ ] yt-dlp.exe is NOT required in resources\tools for packaging
@@ -30,7 +33,8 @@ The script rebuilds resources\wpc-provider\runtime from the exact regression-tes
   yt-dlp-getpot-wpc 1.1.2 / nodriver 0.50.3 / mss 10.2.0 / websockets 16.1.1
   deprecated 1.3.1 / wrapt 2.3.0
 It downloads each wheel with --no-deps, verifies the exact dist-info set, and removes
-stale __pycache__ / .pyc files before packaging.
+stale __pycache__ / .pyc files before packaging. The resulting Python source and
+package metadata are bundled with RR-V.
 
 Build
   powershell -ExecutionPolicy Bypass -File .\BUILD_RELEASE.ps1
@@ -39,17 +43,39 @@ BUILD_RELEASE.ps1 performs:
   1. Build RR-V-Auth-Helper.exe as a separate process component
   2. Build RR-V as PyInstaller onedir
   3. Copy RR-V-Auth-Helper.exe beside RR-V.exe
-  4. Verify yt-dlp / FFmpeg / FFprobe / Deno were not bundled accidentally
+  4. Collect third-party notices, source offer, Python/PySide/WPC license metadata,
+     and RR-V Auth Helper source into the release
+  5. Verify required release files and confirm yt-dlp / FFmpeg / FFprobe / Deno
+     were not bundled accidentally
 
 Expected output
   dist\RR-V\RR-V.exe
   dist\RR-V\RR-V-Auth-Helper.exe
+  dist\RR-V\THIRD_PARTY_NOTICES.txt
+  dist\RR-V\SOURCE_OFFER.txt
+  dist\RR-V\licenses\BUILD_LICENSE_MANIFEST.txt
+  dist\RR-V\licenses\Python-LICENSE.txt
+  dist\RR-V\licenses\PySide6-Qt\...
+  dist\RR-V\licenses\WPC-runtime\...
+  dist\RR-V\licenses\RR-V-Auth-Helper-source\...
   dist\RR-V\_internal\...
 
 Post-build source safety
 [ ] main.py still exists
 [ ] auth_helper / app / controllers / core / services / ui / workers still contain .py source files
 [ ] Only build/, dist/, and temporary helper build output were created/replaced by packaging
+
+License package verification
+[ ] THIRD_PARTY_NOTICES.txt opens and lists bundled vs runtime-downloaded components
+[ ] SOURCE_OFFER.txt opens and contains the source request contact
+[ ] licenses\BUILD_LICENSE_MANIFEST.txt records the exact Python/PySide6/PyInstaller build versions
+[ ] licenses\Python-LICENSE.txt is present
+[ ] licenses\PySide6-Qt contains METADATA and available license files from all four pinned distributions
+[ ] licenses\WPC-runtime contains the exact locked wheel METADATA and available LICENSE/COPYING/NOTICE files
+[ ] licenses\RR-V-Auth-Helper-source contains main.py, README.md, LICENSE_NOTICE.txt, and RR-V-Auth-Helper.spec
+[ ] The bundled WPC runtime still contains the nodriver and modified yt-dlp-getpot-wpc Python sources
+[ ] Program Information > Third-party license notice opens THIRD_PARTY_NOTICES.txt
+[ ] Program Information > Source availability opens SOURCE_OFFER.txt
 
 Fresh-install runtime tool regression
 [ ] Start with %LOCALAPPDATA%\RR-V\tools containing no yt-dlp / ffmpeg / ffprobe / deno
@@ -63,13 +89,14 @@ Fresh-install runtime tool regression
 [ ] A real video information lookup/download succeeds after first-time tool installation
 
 YouTube / site authentication regression
-[ ] Settings > Site Authentication shows YouTube / Instagram / TikTok login controls
+[ ] Settings > Site Authentication offers Google Chrome and Microsoft Edge only
 [ ] RR-V.exe finds RR-V-Auth-Helper.exe beside it in the onedir root
-[ ] A fresh YouTube login opens the compact authentication browser and saves authentication successfully
+[ ] A fresh Chrome YouTube login saves authentication successfully
+[ ] A fresh Edge YouTube login saves authentication successfully
 [ ] Korean authentication status text is not corrupted across the Helper IPC boundary
 [ ] Existing RR-V authentication is reused after restart
 [ ] YouTube information lookup and a 4K download succeed with saved authentication
-[ ] Instagram RR-V-managed login succeeds and survives restart
+[ ] Instagram RR-V-managed login succeeds in Chrome/Edge and survives restart
 [ ] Instagram authentication is applied automatically to information lookup and downloads
 [ ] TikTok RR-V-managed login succeeds and survives restart
 [ ] TikTok authentication is applied automatically when yt-dlp processes TikTok URLs
@@ -79,6 +106,9 @@ YouTube / site authentication regression
 UI regression
 [ ] Version display shows 1.2.0
 [ ] Light and dark Warm Sage themes both render normally
+[ ] Settings contains six tabs and no duplicate Program Information tab
+[ ] Sidebar Program Information sits directly above Version 1.2.0 in the lower app-info area
+[ ] Program Information shows RR-V version, update check, developer/contact, GitHub, support, and license/source links
 [ ] Tools & Resources shows yt-dlp / FFmpeg / Deno / YouTube authentication runtime status
 [ ] Tools & Resources can install missing external runtime tools
 [ ] Tools & Resources can bring installed tools to the supported latest state
@@ -111,10 +141,10 @@ Runtime storage
 License / distribution boundary
 [ ] RR-V core does not import nodriver directly
 [ ] RR-V core communicates with RR-V Auth Helper only through the documented process/JSON-lines boundary
-[ ] Auth Helper source is preserved and distributed/provided under terms compatible with nodriver AGPL-3.0
-[ ] Include/review the applicable AGPL license copy and nodriver copyright/license notices before public distribution
-[ ] Create/review THIRD_PARTY_NOTICES before public distribution
-[ ] Preserve PySide6 / Qt LGPL notices and required source/access information
-[ ] Record the official download sources used for yt-dlp Nightly, FFmpeg Release Essentials, and Deno
-[ ] Preserve WPC and bundled Python dependency license notices/source records
-[ ] Archive the exact RR-V 1.2.0 source commit, specs, build script, browser extension, and final Installer/build output
+[ ] RR-V Auth Helper is identified as AGPL-3.0-only and its preferred source is shipped with the release
+[ ] nodriver 0.50.3 AGPL source and license metadata remain in the bundled WPC runtime/release license material
+[ ] The RR-V modification to yt-dlp-getpot-wpc is disclosed and the modified source is shipped
+[ ] PySide6 / Qt LGPL notices and exact package metadata are preserved
+[ ] SOURCE_OFFER.txt remains valid and the contact address is current
+[ ] Official download sources for yt-dlp Nightly, FFmpeg Release Essentials, and Deno match app\tool_sources.py
+[ ] Archive the exact RR-V 1.2.0 source commit, specs, build script, WPC lock, browser extension, final onedir build, and Installer
