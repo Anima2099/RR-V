@@ -178,7 +178,7 @@ class AboutPage(QWidget):
         button_row.addWidget(support_button)
         button_row.addStretch()
 
-        support_hint = QLabel("잘 쓰고 계신다면 커피 한 잔 부탁 드립니다")
+        support_hint = QLabel("잘 쓰고 계신다면 커피 한 잔 부탁 드립니다!")
         support_hint.setObjectName("mutedText")
         support_hint.setWordWrap(True)
 
