@@ -36,6 +36,14 @@ dist/RR-V/
   _internal/
 ```
 
+The community-beta Installer is built with Inno Setup 7 as a **per-user installation**. It does not request administrator elevation. The default installation directory is shown to the user and may be changed:
+
+```text
+%LOCALAPPDATA%\Programs\RR-V
+```
+
+RR-V is registered in Windows Installed apps and includes a normal uninstaller. During uninstall, the user can choose whether RR-V user data under LocalAppData/AppData should also be removed. User-data deletion is off by default; RR-V integration registry entries are removed regardless.
+
 The RR-V Installer does **not** bundle these large external executables:
 
 - `yt-dlp.exe`
@@ -67,22 +75,24 @@ nodriver / Chromium browser
 ## Repository layout
 
 ```text
-app/                  application settings, paths, stores, and shared app logic
-auth_helper/          isolated browser-authentication helper source
-controllers/          UI/controller coordination
-core/                 core data models
-services/             download, authentication, browser integration, media services
-ui/                   main window, pages, dialogs, and widgets
-workers/              background worker objects
-resources/            icons, theme, browser connector, WPC runtime metadata
-main.py                application entry point
-RR-V.spec              PyInstaller onedir build specification
-RR-V-Auth-Helper.spec  separate Auth Helper build specification
-BUILD_RELEASE.ps1      integrated release build and license/source packaging
-PREP_WPC_PROVIDER.ps1  prepares the locked WPC/nodriver runtime
+app/                   application settings, paths, stores, and shared app logic
+auth_helper/           isolated browser-authentication helper source
+controllers/           UI/controller coordination
+core/                  core data models
+installer/             Inno Setup script and Installer notes
+services/              download, authentication, browser integration, media services
+ui/                    main window, pages, dialogs, and widgets
+workers/               background worker objects
+resources/             icons, theme, browser connector, WPC runtime metadata
+main.py                 application entry point
+RR-V.spec               PyInstaller onedir build specification
+RR-V-Auth-Helper.spec   separate Auth Helper build specification
+BUILD_RELEASE.ps1       integrated release build and license/source packaging
+BUILD_INSTALLER.ps1     verifies dist/RR-V and builds RR-V_Setup_1.2.0.exe
+PREP_WPC_PROVIDER.ps1   prepares the locked WPC/nodriver runtime
 PACKAGING_CHECKLIST.txt release/regression checklist
 THIRD_PARTY_NOTICES.txt third-party component and license map
-SOURCE_OFFER.txt       source-availability information for copyleft components
+SOURCE_OFFER.txt        source-availability information for copyleft components
 ```
 
 ## Development notes
@@ -93,6 +103,7 @@ The repository intentionally does **not** track generated or machine-local items
 
 - `.venv/`
 - PyInstaller `build/`, `dist/`, and helper build output
+- generated `installer-output/`
 - `resources/wpc-provider/runtime/`
 - external runtime executables under `resources/tools/`
 - logs, queue data, settings, cookies, and login credentials
@@ -111,6 +122,20 @@ powershell -ExecutionPolicy Bypass -File .\BUILD_RELEASE.ps1
 ```
 
 `BUILD_RELEASE.ps1` builds the Auth Helper and RR-V, places the helper beside `RR-V.exe`, verifies that yt-dlp / FFmpeg / FFprobe / Deno were not accidentally bundled, and collects release license/source materials.
+
+After installing Inno Setup 7, create the community-beta Installer with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\BUILD_INSTALLER.ps1
+```
+
+Expected output:
+
+```text
+installer-output\RR-V_Setup_1.2.0.exe
+```
+
+`BUILD_INSTALLER.ps1` verifies the release layout and license files again, rejects accidentally bundled external tools or Qt Virtual Keyboard, finds `ISCC.exe`, compiles the Installer, and prints its SHA-256 hash. See `installer/README.md` for the install/uninstall policy and smoke-test flow.
 
 Before a release, follow `PACKAGING_CHECKLIST.txt`.
 
