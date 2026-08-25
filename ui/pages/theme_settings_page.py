@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QRadioButton,
+    QSizePolicy,
 )
 
 from app.component_updates import (
@@ -19,6 +20,7 @@ from app.component_updates import (
     check_component_updates,
     normalize_ffmpeg_release_version,
 )
+from app.constants import APP_VERSION
 from app.paths import RRV_TOOLS_DIR
 from app.runtime_tool_installer import ensure_runtime_tools
 from app.theme import (
@@ -40,11 +42,16 @@ from ui.pages.settings_page import SettingsPage
 from ui.widgets.common import create_card
 
 
+GITHUB_PROFILE_URL = "https://github.com/Anima2099"
+BUY_ME_A_COFFEE_URL = "https://buymeacoffee.com/anima2099"
+
+
 class ThemeSettingsPage(SettingsPage):
     """1.2.0 화면 테마와 다운로드형 필수 도구 관리 UX를 제공한다."""
 
     component_check_finished = Signal(object, bool)
     open_tools_requested = Signal()
+    ABOUT_TAB = 6
 
     def __init__(self) -> None:
         super().__init__()
@@ -53,6 +60,24 @@ class ThemeSettingsPage(SettingsPage):
         self._tools_tab_checked_once = False
         self._missing_runtime_keys: set[str] = set()
         self.component_check_finished.connect(self._component_check_done)
+
+        self.settings_stack.addWidget(self._create_about_tab())
+        tab_bar = self.findChild(QFrame, "toolTabBar")
+        if tab_bar is not None and tab_bar.layout() is not None:
+            info_button = QPushButton("정보")
+            info_button.setObjectName("toolTabButton")
+            info_button.setCheckable(True)
+            info_button.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
+            info_button.clicked.connect(
+                lambda checked=False: self.show_settings_tab(self.ABOUT_TAB)
+            )
+            self.tab_button_group.addButton(info_button, self.ABOUT_TAB)
+            self.tab_buttons.append(info_button)
+            tab_bar.layout().addWidget(info_button, 1)
+
         self._refresh_tool_status()
 
     def _create_general_tab(self):  # type: ignore[no-untyped-def]
@@ -74,6 +99,80 @@ class ThemeSettingsPage(SettingsPage):
                 self._create_diagnostics_card(),
             ]
         )
+
+    def _create_about_tab(self):  # type: ignore[no-untyped-def]
+        return self._create_scroll_page(
+            [
+                self._create_about_rrv_card(),
+                self._create_about_links_card(),
+            ]
+        )
+
+    def _create_about_rrv_card(self) -> QFrame:
+        card, layout = create_card()
+
+        title = QLabel("RR-V")
+        title.setObjectName("sectionTitle")
+
+        product = QLabel("Video Downloader & Media Tools")
+        product.setObjectName("settingsGroupTitle")
+
+        version = QLabel(f"Version {APP_VERSION} · Community Beta")
+        version.setObjectName("mutedText")
+
+        description = QLabel(
+            "RR-V는 영상 다운로드와 간단한 미디어 작업을 한 곳에서 다루기 위한 Windows용 도구입니다. "
+            "다운로드에 필요한 외부 실행 도구는 RR-V에서 공식 배포처를 통해 준비하고 관리합니다."
+        )
+        description.setObjectName("bodyText")
+        description.setWordWrap(True)
+
+        layout.addWidget(title)
+        layout.addWidget(product)
+        layout.addWidget(version)
+        layout.addWidget(description)
+        return card
+
+    def _create_about_links_card(self) -> QFrame:
+        card, layout = create_card()
+
+        title = QLabel("개발자와 링크")
+        title.setObjectName("sectionTitle")
+
+        description = QLabel(
+            "개발자 GitHub에서 RR-V의 공개 소스와 다른 프로젝트를 확인할 수 있습니다. "
+            "RR-V가 유용했다면 Buy Me a Coffee를 통해 자율적으로 후원할 수 있습니다."
+        )
+        description.setObjectName("bodyText")
+        description.setWordWrap(True)
+
+        github_button = QPushButton("GitHub · Anima2099")
+        github_button.setObjectName("primaryButton")
+        github_button.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(GITHUB_PROFILE_URL))
+        )
+
+        support_button = QPushButton("Buy Me a Coffee")
+        support_button.setObjectName("secondaryButton")
+        support_button.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(BUY_ME_A_COFFEE_URL))
+        )
+
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
+        button_row.addWidget(github_button)
+        button_row.addWidget(support_button)
+        button_row.addStretch()
+
+        hint = QLabel("후원 여부는 RR-V의 기능이나 업데이트 이용에 아무런 영향을 주지 않습니다.")
+        hint.setObjectName("mutedText")
+        hint.setWordWrap(True)
+
+        layout.addWidget(title)
+        layout.addWidget(description)
+        layout.addLayout(button_row)
+        layout.addWidget(hint)
+        return card
 
     def _create_theme_card(self) -> QFrame:
         card, layout = create_card()
