@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# RR-V 1.2.0 community beta packaging spec
+# RR-V 1.2.0 community beta · onedir packaging spec
 
 from pathlib import Path
 
@@ -101,7 +101,7 @@ datas.extend(
 )
 
 # RR-V는 로컬 단일 실행/URL 전달에 QtNetwork를 사용한다. QtSvg와 함께
-# onefile 환경에서 명시적으로 포함한다.
+# onedir 환경에서 명시적으로 포함한다.
 hiddenimports = [
     "PySide6.QtNetwork",
     "PySide6.QtSvg",
@@ -129,12 +129,13 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
+# onedir: Python/Qt DLL과 리소스는 dist/RR-V/_internal 아래에 분리되고,
+# 사용자가 실행하는 RR-V.exe는 dist/RR-V 루트에 남는다.
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="RR-V",
     debug=False,
     bootloader_ignore_signals=False,
@@ -144,4 +145,14 @@ exe = EXE(
     disable_windowed_traceback=False,
     icon=str(APP_ICON),
     version=str(VERSION_FILE),
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name="RR-V",
 )
