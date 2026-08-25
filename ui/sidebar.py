@@ -55,6 +55,17 @@ class Sidebar(QFrame):
 
         layout.addStretch()
 
+        info_button = QPushButton("프로그램 정보")
+        info_button.setObjectName("navButton")
+        info_button.setCheckable(True)
+        info_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        info_button.clicked.connect(
+            lambda checked=False: self.page_requested.emit(3)
+        )
+        self.nav_buttons.append(info_button)
+        layout.addWidget(info_button)
+        layout.addSpacing(2)
+
         version = QLabel(f"Version {APP_VERSION}")
         version.setObjectName("versionLabel")
         version.setAlignment(Qt.AlignmentFlag.AlignCenter)
