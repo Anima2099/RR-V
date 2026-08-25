@@ -31,6 +31,7 @@ dist/RR-V/
   RR-V.exe
   RR-V-Auth-Helper.exe
   LICENSE.txt
+  LICENSE.ko-KR.txt
   THIRD_PARTY_NOTICES.txt
   SOURCE_OFFER.txt
   licenses/
@@ -92,6 +93,8 @@ BUILD_RELEASE.ps1       integrated release build and license/source packaging
 BUILD_INSTALLER.ps1     verifies dist/RR-V and builds RR-V_Setup_1.2.0.exe
 PREP_WPC_PROVIDER.ps1   prepares the locked WPC/nodriver runtime
 PACKAGING_CHECKLIST.txt release/regression checklist
+LICENSE                 authoritative RR-V Source Available License 1.0 text
+LICENSE.ko-KR.txt       Korean convenience translation; English LICENSE controls
 THIRD_PARTY_NOTICES.txt third-party component and license map
 SOURCE_OFFER.txt        source-availability information for copyleft components
 ```
@@ -170,7 +173,7 @@ External yt-dlp / FFmpeg / Deno executables downloaded after installation remain
 
 ### RR-V core
 
-The RR-V core is distributed under the **RR-V Source Available License 1.0**. See [`LICENSE`](LICENSE) for the complete terms.
+The RR-V core is distributed under the **RR-V Source Available License 1.0**. See [`LICENSE`](LICENSE) for the complete authoritative terms. A Korean convenience translation is available in [`LICENSE.ko-KR.txt`](LICENSE.ko-KR.txt); if the translation differs from the English text, the English `LICENSE` controls.
 
 In short:
 
@@ -186,7 +189,7 @@ RR-V is **source available**, not OSI-approved open-source software.
 
 ### 한국어 요약
 
-RR-V 본체는 **RR-V Source Available License 1.0**에 따라 소스가 공개됩니다.
+RR-V 본체는 **RR-V Source Available License 1.0**에 따라 소스가 공개됩니다. 전체 한국어 번역본은 [`LICENSE.ko-KR.txt`](LICENSE.ko-KR.txt)에서 확인할 수 있으며, 번역본과 영어 원문의 해석이 다른 경우 영어 `LICENSE`가 우선합니다.
 
 - 개인적인 사용이 허용됩니다.
 - 교육, 연구, 창작 및 업무에서 RR-V를 도구로 사용하는 것이 허용됩니다.
