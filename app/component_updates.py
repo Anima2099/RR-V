@@ -5,9 +5,9 @@ import json
 import re
 import time
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 from app.constants import APP_VERSION
+from app.http_client import fetch_https_text
 from app.settings_store import get_settings
 from app.tool_manager import inspect_tools
 from app.tool_sources import (
@@ -99,17 +99,16 @@ def update_check_due(local_signature: str) -> bool:
 
 
 def _fetch_text(url: str, *, accept: str = "text/plain") -> str:
-    request = Request(
+    return fetch_https_text(
         url,
         headers={
             "User-Agent": f"RR-V/{APP_VERSION}",
             "Accept": accept,
             "Cache-Control": "no-cache",
         },
+        timeout=8,
+        max_bytes=256 * 1024,
     )
-    with urlopen(request, timeout=8) as response:
-        data = response.read(256 * 1024)
-    return data.decode("utf-8", errors="replace").strip()
 
 
 def _installed_versions() -> dict[str, str]:
