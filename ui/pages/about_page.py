@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+import sys
 import threading
 
 from PySide6.QtCore import Qt, QUrl, Signal
@@ -58,12 +60,24 @@ class AboutPage(QWidget):
         content_layout.addWidget(self._create_product_card())
         content_layout.addWidget(self._create_update_card())
         content_layout.addWidget(self._create_developer_card())
+        content_layout.addWidget(self._create_license_card())
         content_layout.addStretch()
 
         scroll.setWidget(content)
         layout.addWidget(scroll, 1)
 
         self.update_check_finished.connect(self._update_check_done)
+
+    @staticmethod
+    def _distribution_root() -> Path:
+        if getattr(sys, "frozen", False):
+            return Path(sys.executable).resolve().parent
+        return Path(__file__).resolve().parents[2]
+
+    def _open_distribution_file(self, filename: str) -> None:
+        path = self._distribution_root() / filename
+        if path.is_file():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _create_product_card(self) -> QFrame:
         card, card_layout = create_card()
@@ -187,6 +201,41 @@ class AboutPage(QWidget):
         card_layout.addWidget(email)
         card_layout.addLayout(button_row)
         card_layout.addWidget(support_hint)
+        return card
+
+    def _create_license_card(self) -> QFrame:
+        card, card_layout = create_card()
+
+        title = QLabel("라이선스 및 소스")
+        title.setObjectName("sectionTitle")
+
+        description = QLabel(
+            "RR-V에 포함되거나 연결되는 제3자 구성요소의 라이선스와 소스 제공 안내를 확인할 수 있습니다."
+        )
+        description.setObjectName("bodyText")
+        description.setWordWrap(True)
+
+        notices_button = QPushButton("제3자 라이선스 고지")
+        notices_button.setObjectName("secondaryButton")
+        notices_button.clicked.connect(
+            lambda: self._open_distribution_file("THIRD_PARTY_NOTICES.txt")
+        )
+
+        source_button = QPushButton("소스 제공 안내")
+        source_button.setObjectName("secondaryButton")
+        source_button.clicked.connect(
+            lambda: self._open_distribution_file("SOURCE_OFFER.txt")
+        )
+
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
+        button_row.addWidget(notices_button)
+        button_row.addWidget(source_button)
+        button_row.addStretch()
+
+        card_layout.addWidget(title)
+        card_layout.addWidget(description)
+        card_layout.addLayout(button_row)
         return card
 
     def _start_update_check(self) -> None:
