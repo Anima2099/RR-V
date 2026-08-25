@@ -36,6 +36,15 @@ def _creation_flags() -> int:
     return subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 
+def _looks_like_certificate_error(message: str) -> bool:
+    normalized = str(message or "").upper()
+    return (
+        "CERTIFICATE_VERIFY_FAILED" in normalized
+        or "CERTIFICATE VERIFY FAILED" in normalized
+        or "UNABLE TO GET LOCAL ISSUER CERTIFICATE" in normalized
+    )
+
+
 def _fetch_release_asset(api_url: str, asset_name: str) -> ReleaseAsset:
     payload = json.loads(
         fetch_https_bytes(
@@ -173,7 +182,11 @@ def _executable_version(path: Path, args: tuple[str, ...]) -> str:
 def ensure_ytdlp(progress: ProgressCallback | None = None) -> tuple[bool, str]:
     current = find_executable("yt-dlp.exe")
     if current is not None:
-        return update_ytdlp(progress)
+        ok, message = update_ytdlp(progress)
+        if ok or not _looks_like_certificate_error(message):
+            return ok, message
+        if progress is not None:
+            progress("yt-dlp 자체 업데이트의 인증서 확인이 실패해 Windows HTTPS 경로로 다시 준비합니다…")
 
     try:
         if progress is not None:
@@ -210,7 +223,11 @@ def _deno_windows_asset_name() -> str:
 def ensure_deno(progress: ProgressCallback | None = None) -> tuple[bool, str]:
     current = find_executable("deno.exe")
     if current is not None:
-        return update_deno(progress)
+        ok, message = update_deno(progress)
+        if ok or not _looks_like_certificate_error(message):
+            return ok, message
+        if progress is not None:
+            progress("Deno 자체 업데이트의 인증서 확인이 실패해 Windows HTTPS 경로로 다시 준비합니다…")
 
     try:
         if progress is not None:
