@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/rr-v_banner.png" alt="RR-V banner" width="100%">
+</p>
+
 # RR-V
 
 ### Video Downloader & Media Tools for Windows
@@ -29,15 +33,21 @@
 
 ## 스크린샷
 
-<!--
-Community Beta 공개 이미지가 준비되면 이 위치에 배치합니다.
-권장 구성:
-1. 메인 인터페이스 큰 이미지
-2. 다크 모드 / 다운로드 목록
-3. 일괄 다운로드 추가 / 미디어 도구
-4. 브라우저 확장 프로그램
-5. Browser Connector 동작 WebP
--->
+### 메인 인터페이스
+
+![RR-V 메인 인터페이스](docs/images/rrv-main.jpg)
+
+### 다운로드 & 일괄 추가
+
+| 다운로드 목록 | 여러 주소 · 재생목록 일괄 추가 |
+| :---: | :---: |
+| ![RR-V 다운로드 목록](docs/images/rrv-download-list.jpg) | ![RR-V 일괄 추가](docs/images/rrv-batch-add.jpg) |
+
+### 다크 모드 & 미디어 도구
+
+| 다크 모드 | 미디어 도구 |
+| :---: | :---: |
+| ![RR-V 다크 모드](docs/images/rrv-dark.jpg) | ![RR-V 미디어 도구](docs/images/rrv-tools.jpg) |
 
 ## 설치 후 처음 할 일
 
@@ -71,6 +81,12 @@ RR-V에는 Chrome / Edge용 **RR-V Browser Connector**가 포함되어 있습니
 확장 프로그램을 설치하면 영상 페이지에서 RR-V 아이콘을 누르거나 영상 링크의 오른쪽 클릭 메뉴를 사용하여 현재 URL을 RR-V 다운로드 목록으로 바로 보낼 수 있습니다.
 
 설치 방법은 **설정 → 브라우저 확장**에서 확인할 수 있습니다.
+
+### Browser Connector 동작
+
+| 확장 아이콘 클릭 | 영상 링크에서 오른쪽 클릭 |
+| :---: | :---: |
+| ![RR-V Browser Connector 아이콘 전송](docs/images/rrv-browser-connector-demo1.webp) | ![RR-V Browser Connector 링크 전송](docs/images/rrv-browser-connector-demo2.webp) |
 
 ## Community Beta
 
