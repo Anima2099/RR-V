@@ -23,6 +23,7 @@ from app.constants import (
     MINIMUM_HEIGHT,
     MINIMUM_WIDTH,
 )
+from ui.pages.about_page import AboutPage
 from ui.pages.download_page import DownloadPage
 from ui.pages.media_tools_page import MediaToolsPage
 from ui.pages.theme_settings_page import ThemeSettingsPage
@@ -45,6 +46,15 @@ class MainWindow(QMainWindow):
         self.download_page = DownloadPage()
         self.media_tools_page = MediaToolsPage()
         self.settings_page = ThemeSettingsPage()
+        self.about_page = AboutPage()
+
+        # 1.2.0에서 프로그램 정보는 설정 탭이 아니라 사이드바의 독립 페이지로
+        # 이동했다. 이전 정보 탭 버튼은 화면에서 숨겨 설정 탭을 6개로 유지한다.
+        if hasattr(self.settings_page, "ABOUT_TAB"):
+            about_index = int(self.settings_page.ABOUT_TAB)
+            if 0 <= about_index < len(self.settings_page.tab_buttons):
+                self.settings_page.tab_buttons[about_index].setVisible(False)
+
         self.settings_page.general_preferences_saved.connect(
             self._apply_tray_preferences
         )
@@ -54,6 +64,7 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self.download_page)
         self.pages.addWidget(self.media_tools_page)
         self.pages.addWidget(self.settings_page)
+        self.pages.addWidget(self.about_page)
 
         self.sidebar = Sidebar()
         self.sidebar.page_requested.connect(self.show_page)
