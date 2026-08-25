@@ -37,11 +37,12 @@ ENV/
 htmlcov/
 
 # ------------------------------------------------------------
-# PyInstaller / packaging output
-# RR-V.spec and RR-V.version_info.txt are source files and stay tracked.
+# PyInstaller / Installer packaging output
+# RR-V.spec, RR-V.version_info.txt, installer/RR-V.iss and build scripts stay tracked.
 # ------------------------------------------------------------
 build/
 dist/
+installer-output/
 *.egg-info/
 *.log
 *.tmp
