@@ -127,6 +127,21 @@ a = Analysis(
     noarchive=False,
 )
 
+# Qt 6.11의 Qt Virtual Keyboard는 community 배포에서 GPLv3 전용 모듈이다.
+# RR-V는 이 기능을 사용하지 않지만 PyInstaller의 Qt plugin 수집 과정에서
+# DLL/plugin이 따라올 수 있으므로 release TOC에서 명시적으로 제외한다.
+# 나머지 RR-V가 사용하는 Qt shared libraries는 LGPLv3 조건으로 배포한다.
+def keep_release_binary(entry):
+    destination = str(entry[0]).replace("\\", "/").lower()
+    blocked_suffixes = (
+        "pyside6/qt6virtualkeyboard.dll",
+        "pyside6/plugins/platforminputcontexts/qtvirtualkeyboardplugin.dll",
+    )
+    return not any(destination.endswith(suffix) for suffix in blocked_suffixes)
+
+
+a.binaries = [entry for entry in a.binaries if keep_release_binary(entry)]
+
 pyz = PYZ(a.pure)
 
 # onedir: Python/Qt DLL과 리소스는 dist/RR-V/_internal 아래에 분리되고,
