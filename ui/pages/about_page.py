@@ -106,7 +106,7 @@ class AboutPage(QWidget):
         core_license_button.setObjectName("secondaryButton")
         core_license_button.setFixedHeight(30)
         core_license_button.clicked.connect(
-            lambda: self._open_distribution_file("LICENSE.txt" if getattr(sys, "frozen", False) else "LICENSE")
+            lambda: self._open_distribution_file("LICENSE.ko-KR.txt")
         )
 
         notices_button = QPushButton("제3자 라이선스")
