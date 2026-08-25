@@ -6,6 +6,7 @@ $Root = $PSScriptRoot
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
 $MainSpec = Join-Path $Root "RR-V.spec"
 $HelperSpec = Join-Path $Root "RR-V-Auth-Helper.spec"
+$CoreLicense = Join-Path $Root "LICENSE"
 $ThirdPartyNotice = Join-Path $Root "THIRD_PARTY_NOTICES.txt"
 $SourceOffer = Join-Path $Root "SOURCE_OFFER.txt"
 $HelperSourceDir = Join-Path $Root "auth_helper"
@@ -19,6 +20,7 @@ $MainOutputDir = Join-Path $DistDir "RR-V"
 $MainExe = Join-Path $MainOutputDir "RR-V.exe"
 $HelperSourceExe = Join-Path $HelperDistDir "RR-V-Auth-Helper.exe"
 $HelperDestExe = Join-Path $MainOutputDir "RR-V-Auth-Helper.exe"
+$CoreLicenseOutput = Join-Path $MainOutputDir "LICENSE.txt"
 $LicenseOutputDir = Join-Path $MainOutputDir "licenses"
 $HelperSourceOutputDir = Join-Path $LicenseOutputDir "RR-V-Auth-Helper-source"
 $QtVersion = "6.11.1"
@@ -81,6 +83,9 @@ if (-not (Test-Path $MainSpec)) {
 if (-not (Test-Path $HelperSpec)) {
     throw "RR-V-Auth-Helper.spec is missing."
 }
+if (-not (Test-Path $CoreLicense)) {
+    throw "RR-V core LICENSE is missing."
+}
 if (-not (Test-Path $ThirdPartyNotice)) {
     throw "THIRD_PARTY_NOTICES.txt is missing."
 }
@@ -134,6 +139,7 @@ if (-not (Test-Path $HelperDestExe)) {
 
 Write-Host "[4/5] Collecting license and source materials..."
 New-Item -ItemType Directory -Path $LicenseOutputDir -Force | Out-Null
+Copy-Item -Path $CoreLicense -Destination $CoreLicenseOutput -Force
 Copy-Item -Path $ThirdPartyNotice -Destination (Join-Path $MainOutputDir "THIRD_PARTY_NOTICES.txt") -Force
 Copy-Item -Path $SourceOffer -Destination (Join-Path $MainOutputDir "SOURCE_OFFER.txt") -Force
 Copy-Item -Path $ThirdPartyNotice -Destination (Join-Path $LicenseOutputDir "THIRD_PARTY_NOTICES.txt") -Force
@@ -270,6 +276,7 @@ if ($BundledForbiddenQtFiles.Count -gt 0) {
 $RequiredReleaseFiles = @(
     $MainExe,
     $HelperDestExe,
+    $CoreLicenseOutput,
     (Join-Path $MainOutputDir "THIRD_PARTY_NOTICES.txt"),
     (Join-Path $MainOutputDir "SOURCE_OFFER.txt"),
     (Join-Path $LicenseOutputDir "Python-LICENSE.txt"),
@@ -299,6 +306,7 @@ Write-Host "RR-V 1.2.0 onedir build is ready."
 Write-Host ("Output: " + $MainOutputDir)
 Write-Host "  - RR-V.exe"
 Write-Host "  - RR-V-Auth-Helper.exe"
+Write-Host "  - LICENSE.txt"
 Write-Host "  - THIRD_PARTY_NOTICES.txt / SOURCE_OFFER.txt"
 Write-Host "  - licenses\..."
 Write-Host "  - _internal\..."
