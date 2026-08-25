@@ -19,7 +19,8 @@ from app.component_updates import (
     check_component_updates,
     normalize_ffmpeg_release_version,
 )
-from app.paths import RRV_TOOLS_DIR, has_bundled_tools
+from app.paths import RRV_TOOLS_DIR
+from app.runtime_tool_installer import ensure_runtime_tools
 from app.theme import (
     THEME_DARK,
     THEME_LIGHT,
@@ -27,24 +28,20 @@ from app.theme import (
     load_theme_preference,
     save_theme_preference,
 )
-from app.tool_manager import (
-    inspect_tools,
-    update_ffmpeg_release,
-    update_ytdlp,
-)
+from app.tool_manager import inspect_tools
 from app.tool_sources import (
     DENO_RELEASES_PAGE,
     FFMPEG_RELEASES_PAGE,
     WPC_RELEASES_PAGE,
     YTDLP_RELEASES_PAGE,
 )
-from ui.dialogs.warm_dialogs import ask_warm_question, show_warm_message
+from ui.dialogs.warm_dialogs import ask_warm_question
 from ui.pages.settings_page import SettingsPage
 from ui.widgets.common import create_card
 
 
 class ThemeSettingsPage(SettingsPage):
-    """1.1.3 화면 테마와 간소화된 도구 업데이트 UX를 제공한다."""
+    """1.2.0 화면 테마와 다운로드형 필수 도구 관리 UX를 제공한다."""
 
     component_check_finished = Signal(object, bool)
     open_tools_requested = Signal()
@@ -54,7 +51,9 @@ class ThemeSettingsPage(SettingsPage):
         self._component_check_running = False
         self._last_component_result: ComponentUpdateCheckResult | None = None
         self._tools_tab_checked_once = False
+        self._missing_runtime_keys: set[str] = set()
         self.component_check_finished.connect(self._component_check_done)
+        self._refresh_tool_status()
 
     def _create_general_tab(self):  # type: ignore[no-untyped-def]
         return self._create_scroll_page(
@@ -130,8 +129,8 @@ class ThemeSettingsPage(SettingsPage):
         title = QLabel("도구 및 업데이트")
         title.setObjectName("sectionTitle")
         description = QLabel(
-            "RR-V가 사용하는 필수 도구의 상태와 버전을 관리합니다. "
-            "새 버전이 있으면 필요한 도구만 한 번에 업데이트할 수 있습니다."
+            "RR-V가 사용하는 외부 실행 도구를 관리합니다. "
+            "도구가 없으면 각 공식 배포처에서 내려받아 설치하고, 이미 있으면 최신 상태로 맞춥니다."
         )
         description.setObjectName("bodyText")
         description.setWordWrap(True)
@@ -173,7 +172,6 @@ class ThemeSettingsPage(SettingsPage):
 
             version_label = QLabel("확인 중…")
             version_label.setObjectName("mutedText")
-            version_label.setTextInteractionFlags(version_label.textInteractionFlags())
 
             status_label = QLabel("확인 중…")
             status_label.setObjectName("mutedText")
@@ -196,28 +194,19 @@ class ThemeSettingsPage(SettingsPage):
         open_button.setObjectName("secondaryButton")
         open_button.clicked.connect(self._open_tools_folder)
 
-        self.restore_tools_button = QPushButton("문제 발생 시 복구")
-        self.restore_tools_button.setObjectName("secondaryButton")
-        self.restore_tools_button.clicked.connect(self._restore_packaged_tools)
-        self.restore_tools_button.setToolTip(
-            "RR-V 패키지에 포함된 기본 도구와 인증 런타임으로 복구합니다."
-        )
-
         self.component_check_button = QPushButton("업데이트 확인")
         self.component_check_button.setObjectName("secondaryButton")
         self.component_check_button.clicked.connect(
             lambda: self.start_component_update_check(force=True, notify=False)
         )
 
-        self.latest_update_button = QPushButton("최신 업데이트 하기")
+        self.latest_update_button = QPushButton("최신 상태로 맞추기")
         self.latest_update_button.setObjectName("primaryButton")
-        self.latest_update_button.setEnabled(False)
         self.latest_update_button.clicked.connect(self._start_latest_updates)
 
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
         action_row.addWidget(open_button)
-        action_row.addWidget(self.restore_tools_button)
         action_row.addStretch()
         action_row.addWidget(self.component_check_button)
         action_row.addWidget(self.latest_update_button)
@@ -278,6 +267,7 @@ class ThemeSettingsPage(SettingsPage):
         if not hasattr(self, "tool_status_labels"):
             return
         statuses = {status.key: status for status in inspect_tools()}
+        missing: set[str] = set()
 
         ytdlp = statuses.get("ytdlp")
         if ytdlp is not None:
@@ -287,6 +277,8 @@ class ThemeSettingsPage(SettingsPage):
                 "normal" if ytdlp.available else "error",
                 "✓ 정상" if ytdlp.available else "✕ 없음",
             )
+            if not ytdlp.available:
+                missing.add("ytdlp")
 
         ffmpeg = statuses.get("ffmpeg")
         ffprobe = statuses.get("ffprobe")
@@ -303,6 +295,7 @@ class ThemeSettingsPage(SettingsPage):
         else:
             self.tool_version_labels["ffmpeg"].setText("없음")
             self._set_tool_visual("ffmpeg", "error", "✕ 없음")
+            missing.add("ffmpeg")
 
         deno = statuses.get("deno")
         if deno is not None:
@@ -312,6 +305,8 @@ class ThemeSettingsPage(SettingsPage):
                 "normal" if deno.available else "error",
                 "✓ 정상" if deno.available else "✕ 없음",
             )
+            if not deno.available:
+                missing.add("deno")
 
         pot = statuses.get("pot")
         if pot is not None:
@@ -322,11 +317,17 @@ class ThemeSettingsPage(SettingsPage):
                 "✓ 정상" if pot.available else "✕ 없음",
             )
 
-        self.restore_tools_button.setEnabled(has_bundled_tools())
-        if not has_bundled_tools():
-            self.restore_tools_button.setToolTip(
-                "현재 소스 실행에는 내장 복구 파일이 없습니다. 최종 패키지에서 사용할 수 있습니다."
-            )
+        self._missing_runtime_keys = missing
+        if missing:
+            self.latest_update_button.setText("필수 구성요소 설치")
+            self.latest_update_button.setEnabled(True)
+            if not getattr(self, "_component_check_running", False):
+                self.component_update_status.setText(
+                    f"필수 실행 도구 {len(missing)}개가 필요합니다. 설치 버튼을 눌러 준비해 주세요."
+                )
+        else:
+            self.latest_update_button.setText("최신 상태로 맞추기")
+            self.latest_update_button.setEnabled(True)
 
     def start_component_update_check(
         self,
@@ -345,8 +346,6 @@ class ThemeSettingsPage(SettingsPage):
             try:
                 result = check_component_updates(force=force)
             except Exception:
-                # 업데이트 확인은 부가 기능이다. 예상하지 못한 네트워크/파싱
-                # 오류도 RR-V 본체로 전파하지 않는다.
                 result = ComponentUpdateCheckResult(components=())
             self.component_check_finished.emit(result, notify)
 
@@ -363,18 +362,25 @@ class ThemeSettingsPage(SettingsPage):
             self.component_check_button.setEnabled(True)
 
         if result.skipped:
-            if hasattr(self, "component_update_status"):
+            if self._missing_runtime_keys:
+                self.component_update_status.setText(
+                    f"필수 실행 도구 {len(self._missing_runtime_keys)}개가 필요합니다. 설치 버튼을 눌러 준비해 주세요."
+                )
+            else:
                 self.component_update_status.setText(
                     "✓ 오늘 이미 자동 확인했습니다. 도구가 바뀌면 다음 실행에서 다시 확인합니다."
                 )
             return
 
         if not result.components:
-            if hasattr(self, "component_update_status"):
+            if self._missing_runtime_keys:
                 self.component_update_status.setText(
-                    "업데이트 서버를 확인하지 못했습니다. RR-V는 정상적으로 사용할 수 있습니다."
+                    "필수 도구가 없고 업데이트 서버도 확인하지 못했습니다. 인터넷 연결을 확인해 주세요."
                 )
-                self.latest_update_button.setEnabled(False)
+            else:
+                self.component_update_status.setText(
+                    "업데이트 서버를 확인하지 못했습니다. 현재 설치된 도구는 그대로 사용할 수 있습니다."
+                )
             return
 
         for component in result.components:
@@ -383,16 +389,24 @@ class ThemeSettingsPage(SettingsPage):
             if component.update_available is None:
                 self._set_tool_visual(component.key, "error", "확인 실패")
             elif component.update_available:
-                self._set_tool_visual(component.key, "update", "● 업데이트 가능")
+                installing = component.current.strip().lower() in {"없음", "none"}
+                self._set_tool_visual(
+                    component.key,
+                    "update",
+                    "● 설치 필요" if installing else "● 업데이트 가능",
+                )
             else:
                 self._set_tool_visual(component.key, "normal", "✓ 최신")
 
         updates = result.updates
         failed_count = len(result.errors)
-        self.latest_update_button.setEnabled(bool(updates))
-        if updates:
+        if self._missing_runtime_keys:
             self.component_update_status.setText(
-                f"업데이트 {len(updates)}개가 있습니다. 필요한 도구만 자동으로 업데이트합니다."
+                f"필수 실행 도구 {len(self._missing_runtime_keys)}개가 필요합니다. 공식 배포처에서 자동으로 설치할 수 있습니다."
+            )
+        elif updates:
+            self.component_update_status.setText(
+                f"업데이트 {len(updates)}개가 있습니다. '최신 상태로 맞추기'에서 함께 정리할 수 있습니다."
             )
         elif failed_count:
             self.component_update_status.setText(
@@ -404,11 +418,25 @@ class ThemeSettingsPage(SettingsPage):
         if not notify or not updates:
             return
 
-        lines = [
-            "필수 도구 업데이트가 있습니다.",
-            "안정적인 다운로드를 위해 최신 버전을 권장합니다.",
-            "",
-        ]
+        installing = any(
+            component.current.strip().lower() in {"없음", "none"}
+            for component in updates
+        )
+        if installing:
+            lines = [
+                "RR-V 사용에 필요한 실행 도구가 준비되지 않았습니다.",
+                "도구 및 리소스에서 필수 구성요소를 설치해 주세요.",
+                "",
+            ]
+            title = "RR-V 필수 구성요소"
+        else:
+            lines = [
+                "필수 도구 업데이트가 있습니다.",
+                "안정적인 다운로드를 위해 최신 버전을 권장합니다.",
+                "",
+            ]
+            title = "RR-V 구성요소 업데이트"
+
         for component in updates:
             lines.append(
                 f"• {component.label}\n  {component.current} → {component.latest}"
@@ -416,7 +444,7 @@ class ThemeSettingsPage(SettingsPage):
 
         open_tools = ask_warm_question(
             self,
-            "RR-V 구성요소 업데이트",
+            title,
             "\n".join(lines),
             yes_text="도구 및 리소스 열기",
             no_text="나중에",
@@ -425,65 +453,51 @@ class ThemeSettingsPage(SettingsPage):
             self.open_tools_requested.emit()
 
     def _start_latest_updates(self) -> None:
-        result = self._last_component_result
-        updates = result.updates if result is not None else ()
-        if not updates:
-            show_warm_message(
-                self,
-                "도구 업데이트",
-                "현재 확인된 업데이트가 없습니다. 먼저 '업데이트 확인'을 눌러 주세요.",
-            )
-            return
+        installing = bool(self._missing_runtime_keys)
+        if installing:
+            detail = [
+                "RR-V에 필요한 외부 실행 도구를 각 공식 배포처에서 내려받습니다.",
+                "yt-dlp Nightly, FFmpeg / FFprobe, Deno를 준비하며 다운로드 용량은 버전에 따라 달라질 수 있습니다.",
+                "인터넷 연결이 필요합니다.",
+            ]
+            title = "필수 구성요소 설치"
+            yes_text = "설치 시작"
+            status_text = "필수 구성요소 설치 준비 중…"
+        else:
+            detail = [
+                "yt-dlp Nightly, FFmpeg / FFprobe, Deno를 공식 배포처 기준 최신 상태로 맞춥니다.",
+                "이미 최신인 도구는 다시 다운로드하지 않습니다.",
+                "다운로드나 미디어 작업 중이라면 먼저 작업을 끝내는 것을 권장합니다.",
+            ]
+            title = "도구 최신 상태로 맞추기"
+            yes_text = "확인 시작"
+            status_text = "도구 상태 확인 준비 중…"
 
-        update_keys = {component.key for component in updates}
-        detail = [f"{len(updates)}개의 도구를 최신 버전으로 업데이트합니다."]
-        if "ffmpeg" in update_keys:
-            detail.append("FFmpeg가 포함되어 약 100 MB의 ZIP 파일을 다운로드합니다.")
-        detail.append("다운로드나 미디어 작업 중이라면 먼저 작업을 끝내는 것을 권장합니다.")
         if not ask_warm_question(
             self,
-            "최신 업데이트 하기",
+            title,
             "\n\n".join(detail),
-            yes_text="업데이트 시작",
+            yes_text=yes_text,
             no_text="취소",
         ):
             return
 
         self.latest_update_button.setEnabled(False)
         self.component_check_button.setEnabled(False)
-        self.tool_action_status.emit("업데이트 준비 중…")
+        self.tool_action_status.emit(status_text)
 
         def run() -> None:
-            messages: list[str] = []
-            all_ok = True
-
-            if "ytdlp" in update_keys:
-                ok, message = update_ytdlp(self.tool_action_status.emit)
-                all_ok = all_ok and ok
-                messages.append(
-                    "yt-dlp 업데이트 완료" if ok else f"yt-dlp 업데이트 실패: {message}"
-                )
-
-            if "ffmpeg" in update_keys:
-                ok, message = update_ffmpeg_release(self.tool_action_status.emit)
-                all_ok = all_ok and ok
-                messages.append(
-                    message if ok else f"FFmpeg 업데이트 실패: {message}"
-                )
-
-            self.tool_action_finished.emit(all_ok, "\n".join(messages))
+            ok, message = ensure_runtime_tools(self.tool_action_status.emit)
+            self.tool_action_finished.emit(ok, message)
 
         threading.Thread(target=run, daemon=True).start()
 
     def _tool_action_done(self, ok: bool, message: str) -> None:
         if hasattr(self, "component_check_button"):
             self.component_check_button.setEnabled(True)
-        if hasattr(self, "latest_update_button"):
-            self.latest_update_button.setEnabled(False)
-        if hasattr(self, "restore_tools_button"):
-            self.restore_tools_button.setEnabled(has_bundled_tools())
         if hasattr(self, "tool_action_label"):
-            self.tool_action_label.setText(("✓ " if ok else "⚠ ") + message)
+            prefix = "✓ 완료\n" if ok else "⚠ 일부 작업 실패\n"
+            self.tool_action_label.setText(prefix + message)
         self._refresh_tool_status()
         self.start_component_update_check(force=True, notify=False)
 
