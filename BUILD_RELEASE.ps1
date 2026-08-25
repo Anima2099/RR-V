@@ -252,6 +252,21 @@ if ($BundledExternalTools.Count -gt 0) {
     throw ("External runtime tools must not be bundled in RR-V 1.2.0:`n" + ($BundledExternalTools -join "`n"))
 }
 
+# Qt Virtual Keyboard is GPLv3-only in the Qt 6.11 community distribution.
+# RR-V does not use it; fail the release if PyInstaller ever pulls it back in.
+$ForbiddenQtCommunityFiles = @(
+    "Qt6VirtualKeyboard.dll",
+    "qtvirtualkeyboardplugin.dll"
+)
+$BundledForbiddenQtFiles = @(
+    Get-ChildItem -Path $MainOutputDir -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $ForbiddenQtCommunityFiles -contains $_.Name } |
+        ForEach-Object { $_.FullName }
+)
+if ($BundledForbiddenQtFiles.Count -gt 0) {
+    throw ("GPL-only Qt Virtual Keyboard files must not be bundled with the RR-V core:`n" + ($BundledForbiddenQtFiles -join "`n"))
+}
+
 $RequiredReleaseFiles = @(
     $MainExe,
     $HelperDestExe,
