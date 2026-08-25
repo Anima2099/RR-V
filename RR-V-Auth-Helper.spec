@@ -13,6 +13,42 @@ APP_ICON = PROJECT_ROOT / "resources" / "icons" / "RR-V.ico"
 if not APP_ICON.is_file():
     raise SystemExit(f"RR-V Auth Helper icon is missing: {APP_ICON}")
 
+# nodriver and the WPC packages are deliberately NOT bundled into this EXE.
+# They are loaded later from RR-V's isolated runtime directory. PyInstaller
+# therefore cannot see the standard-library imports used by those runtime
+# modules during static analysis. Keep the required Python stdlib pieces in the
+# helper explicitly so runtime imports work in the frozen executable too.
+RUNTIME_STDLIB_HIDDENIMPORTS = [
+    "platform",
+    "logging",
+    "ssl",
+    "socket",
+    "urllib",
+    "urllib.error",
+    "urllib.parse",
+    "urllib.request",
+    "http",
+    "http.client",
+    "http.cookies",
+    "email",
+    "mimetypes",
+    "secrets",
+    "zipfile",
+    "inspect",
+    "collections",
+    "contextlib",
+    "itertools",
+    "types",
+    "traceback",
+    "uuid",
+    "concurrent.futures",
+    "base64",
+    "hashlib",
+    "hmac",
+    "struct",
+    "datetime",
+]
+
 # Keep the helper small and independent from the Qt GUI application.
 excludes = [
     "PyQt5",
@@ -26,7 +62,7 @@ a = Analysis(
     pathex=[str(PROJECT_ROOT)],
     binaries=[],
     datas=[],
-    hiddenimports=[],
+    hiddenimports=RUNTIME_STDLIB_HIDDENIMPORTS,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
