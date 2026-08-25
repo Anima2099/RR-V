@@ -1,0 +1,148 @@
+RR-V Source Available License 1.0
+
+Copyright (c) 2026 Anima2099
+All rights reserved except as expressly granted below.
+
+1. Scope
+
+This license applies to the RR-V software, source code, executable files,
+documentation, and other materials distributed as part of RR-V, except for
+components that are explicitly provided under a separate license.
+
+2. Permission to Use
+
+You are permitted to:
+
+(a) use RR-V for personal purposes;
+
+(b) use RR-V as a tool in personal, educational, research, creative,
+    or professional work;
+
+(c) inspect and study the RR-V source code;
+
+(d) make private modifications to the RR-V source code for your own use; and
+
+(e) share links to the official RR-V repository or official RR-V releases.
+
+3. Redistribution
+
+You may not redistribute, publish, mirror, upload, sublicense, or otherwise
+provide copies of RR-V, whether in source or binary form, without prior
+written permission from the copyright holder.
+
+This restriction applies to both modified and unmodified copies of RR-V.
+
+Sharing the official RR-V repository or official release link is permitted
+and encouraged.
+
+Public repository features provided by GitHub, including repository forks,
+may be subject to GitHub's own Terms of Service. Such platform functionality
+does not grant any additional right under this license to redistribute,
+release, or republish RR-V or derivative versions elsewhere.
+
+4. Commercial Exploitation
+
+You may not commercially exploit RR-V without prior written permission from
+the copyright holder.
+
+Prohibited commercial exploitation includes, but is not limited to:
+
+(a) selling RR-V or a modified version of RR-V;
+
+(b) including RR-V or a modified version in a paid software package,
+    commercial bundle, or paid distribution;
+
+(c) charging users for access to RR-V or a modified version;
+
+(d) distributing RR-V or a modified version primarily for advertising,
+    subscription, sponsorship, or other monetization purposes; or
+
+(e) presenting RR-V or a modified version as a commercial product owned
+    or developed by another person or organization.
+
+Using RR-V as a tool while performing paid or professional work does not,
+by itself, constitute commercial exploitation of RR-V.
+
+5. Private Modifications
+
+You may modify RR-V for your own use.
+
+Modified versions may not be publicly distributed or made available to
+third parties without prior written permission from the copyright holder.
+
+6. Name, Identity, and Representation
+
+You may not:
+
+(a) claim to be the original author or official maintainer of RR-V;
+
+(b) represent an unofficial or modified version as an official RR-V release;
+
+(c) use the RR-V name, logo, developer identity, or other project branding
+    in a way that falsely suggests authorization, endorsement, or official
+    status; or
+
+(d) remove or intentionally obscure copyright, license, or attribution
+    notices contained in RR-V.
+
+7. Separately Licensed and Third-Party Components
+
+This license does not apply to components that contain or reference their
+own license terms.
+
+Such components remain governed exclusively by their respective licenses.
+
+In particular, the RR-V Auth Helper and its corresponding source code are
+distributed separately under the GNU Affero General Public License,
+version 3.0 only (AGPL-3.0-only), as indicated in that component.
+
+Third-party software and libraries, including components identified in
+THIRD_PARTY_NOTICES.txt and related license files, remain subject to their
+respective copyright and license terms.
+
+If a provision of this license conflicts with the license of a separately
+licensed component, the separately licensed component's license controls
+for that component.
+
+8. No Additional Rights
+
+Access to the RR-V source code does not grant ownership of RR-V and does
+not grant any rights except those expressly stated in this license.
+
+All rights not expressly granted are reserved by the copyright holder.
+
+9. Termination
+
+Your rights under this license automatically terminate if you violate its
+terms.
+
+After termination, you must stop exercising the permissions granted by
+this license.
+
+Any rights granted under separate third-party licenses are unaffected.
+
+10. Disclaimer of Warranty
+
+RR-V is provided "AS IS", without warranty of any kind, express or implied,
+including but not limited to warranties of merchantability, fitness for a
+particular purpose, and non-infringement.
+
+You use RR-V at your own risk.
+
+11. Limitation of Liability
+
+To the maximum extent permitted by applicable law, the copyright holder
+shall not be liable for any direct, indirect, incidental, special,
+consequential, or other damages arising from the use or inability to use
+RR-V.
+
+12. Additional Permission
+
+Permission for redistribution, commercial exploitation, integration,
+or other uses not granted by this license may be requested from:
+
+Anima2099
+anima2099@proton.me
+
+
+RR-V Source Available License 1.0
