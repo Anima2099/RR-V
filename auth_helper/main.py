@@ -393,18 +393,27 @@ def _load_nodriver(runtime_dir: Path):
 async def _wait_for_login(browser, config: SiteConfig) -> None:
     started = time.monotonic()
     last_notice = -1
-    while time.monotonic() - started < 600:
-        if getattr(browser, "stopped", False):
-            raise RuntimeError("로그인 완료 전에 인증 브라우저가 종료되었습니다.")
+    consecutive_cookie_errors = 0
 
+    while time.monotonic() - started < 600:
         try:
             cookies = await browser.cookies.get_all()
+            consecutive_cookie_errors = 0
         except Exception:
             cookies = []
+            consecutive_cookie_errors += 1
 
         if _has_login_cookie(cookies, config):
             _emit_status("로그인 확인 완료 · 인증 정보를 저장하는 중…")
             return
+
+        # nodriver's Browser.stopped reflects the process object it launched,
+        # not necessarily the visible Chromium window. Microsoft Edge may let
+        # that launcher process finish while the actual auth window and CDP
+        # connection remain alive. Treat the browser as gone only after the
+        # real cookie channel has failed repeatedly.
+        if consecutive_cookie_errors >= 6:
+            raise RuntimeError("인증 브라우저 연결이 끊어졌습니다. 로그인 창을 다시 열어 주세요.")
 
         elapsed = int(time.monotonic() - started)
         notice = elapsed // 10
