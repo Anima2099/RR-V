@@ -121,8 +121,7 @@ class ThemeSettingsPage(SettingsPage):
         version.setObjectName("mutedText")
 
         description = QLabel(
-            "RR-V는 영상 다운로드와 간단한 미디어 작업을 한 곳에서 다루기 위한 Windows용 도구입니다. "
-            "다운로드에 필요한 외부 실행 도구는 RR-V에서 공식 배포처를 통해 준비하고 관리합니다."
+            "누구나 손쉽게 영상을 다운 받고, 재밌게 수정하는 프로그램을 만들기 위하여"
         )
         description.setObjectName("bodyText")
         description.setWordWrap(True)
@@ -139,20 +138,17 @@ class ThemeSettingsPage(SettingsPage):
         title = QLabel("개발자와 링크")
         title.setObjectName("sectionTitle")
 
-        description = QLabel(
-            "개발자 GitHub에서 RR-V의 공개 소스와 다른 프로젝트를 확인할 수 있습니다. "
-            "RR-V가 유용했다면 Buy Me a Coffee를 통해 자율적으로 후원할 수 있습니다."
-        )
-        description.setObjectName("bodyText")
-        description.setWordWrap(True)
+        developer = QLabel("개발자 Anima2099\n이메일 anima2099@proton.me")
+        developer.setObjectName("bodyText")
+        developer.setWordWrap(True)
 
-        github_button = QPushButton("GitHub · Anima2099")
+        github_button = QPushButton("깃허브 프로필")
         github_button.setObjectName("primaryButton")
         github_button.clicked.connect(
             lambda: QDesktopServices.openUrl(QUrl(GITHUB_PROFILE_URL))
         )
 
-        support_button = QPushButton("Buy Me a Coffee")
+        support_button = QPushButton("후원하기")
         support_button.setObjectName("secondaryButton")
         support_button.clicked.connect(
             lambda: QDesktopServices.openUrl(QUrl(BUY_ME_A_COFFEE_URL))
@@ -164,12 +160,12 @@ class ThemeSettingsPage(SettingsPage):
         button_row.addWidget(support_button)
         button_row.addStretch()
 
-        hint = QLabel("후원 여부는 RR-V의 기능이나 업데이트 이용에 아무런 영향을 주지 않습니다.")
+        hint = QLabel("잘 쓰고 계신다면 커피 한 잔 부탁 드립니다")
         hint.setObjectName("mutedText")
         hint.setWordWrap(True)
 
         layout.addWidget(title)
-        layout.addWidget(description)
+        layout.addWidget(developer)
         layout.addLayout(button_row)
         layout.addWidget(hint)
         return card
