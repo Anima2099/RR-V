@@ -171,6 +171,65 @@ def _has_login_cookie(cookies, config: SiteConfig) -> bool:
     return bool(names & config.login_cookie_names)
 
 
+def _youtube_cookie_fingerprint(cookies, config: SiteConfig) -> tuple[tuple[str, str, str], ...]:
+    items: list[tuple[str, str, str]] = []
+    for cookie in cookies:
+        domain = str(getattr(cookie, "domain", "") or "")
+        if not _domain_matches(domain, config.cookie_domains):
+            continue
+        name = str(getattr(cookie, "name", "") or "")
+        if not name:
+            continue
+        value = str(getattr(cookie, "value", "") or "")
+        items.append((domain.lower(), name, value))
+    items.sort()
+    return tuple(items)
+
+
+async def _collect_stable_youtube_cookies(browser, config: SiteConfig):
+    """Wait briefly for YouTube's post-login cookie jar to settle.
+
+    A login cookie can appear before the rest of the session cookies finish
+    arriving. Saving immediately can therefore capture a partial jar on some
+    machines. Do not assume a magic cookie count; instead require a minimum
+    wait and several identical snapshots, with a bounded timeout fallback.
+    """
+    started = time.monotonic()
+    minimum_wait = 4.0
+    maximum_wait = 10.0
+    stable_required = 3
+    stable_count = 0
+    previous_fingerprint: tuple[tuple[str, str, str], ...] | None = None
+    latest_cookies = []
+
+    while time.monotonic() - started < maximum_wait:
+        await asyncio.sleep(0.75)
+        try:
+            cookies = await browser.cookies.get_all()
+        except Exception:
+            continue
+
+        latest_cookies = cookies
+        fingerprint = _youtube_cookie_fingerprint(cookies, config)
+        elapsed = time.monotonic() - started
+
+        if elapsed < minimum_wait:
+            previous_fingerprint = fingerprint
+            stable_count = 0
+            continue
+
+        if fingerprint and fingerprint == previous_fingerprint:
+            stable_count += 1
+        else:
+            stable_count = 1
+        previous_fingerprint = fingerprint
+
+        if stable_count >= stable_required and _has_login_cookie(cookies, config):
+            return cookies
+
+    return latest_cookies
+
+
 def _sanitize_cookie_field(value: object) -> str:
     return str(value or "").replace("\t", " ").replace("\r", "").replace("\n", "")
 
@@ -501,8 +560,12 @@ async def _run_login(args: argparse.Namespace, config: SiteConfig) -> None:
         _emit_status(config.settle_prompt)
 
         tab = await browser_instance.get(config.settle_url)
-        await asyncio.sleep(config.settle_delay)
-        cookies = await browser_instance.cookies.get_all()
+        if config.key == "youtube":
+            cookies = await _collect_stable_youtube_cookies(browser_instance, config)
+        else:
+            await asyncio.sleep(config.settle_delay)
+            cookies = await browser_instance.cookies.get_all()
+
         cookie_count, cookie_names = _write_netscape_cookie_file(
             cookies,
             pending_cookie,
