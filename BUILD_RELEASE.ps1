@@ -21,6 +21,9 @@ $HelperSourceExe = Join-Path $HelperDistDir "RR-V-Auth-Helper.exe"
 $HelperDestExe = Join-Path $MainOutputDir "RR-V-Auth-Helper.exe"
 $LicenseOutputDir = Join-Path $MainOutputDir "licenses"
 $HelperSourceOutputDir = Join-Path $LicenseOutputDir "RR-V-Auth-Helper-source"
+$QtVersion = "6.11.1"
+$QtLgplUrl = "https://raw.githubusercontent.com/qt/qtbase/v$QtVersion/LICENSES/LGPL-3.0-only.txt"
+$QtGplUrl = "https://raw.githubusercontent.com/qt/qtbase/v$QtVersion/LICENSES/GPL-3.0-only.txt"
 
 function Copy-LicenseMaterial {
     param(
@@ -48,6 +51,25 @@ function Copy-LicenseMaterial {
             New-Item -ItemType Directory -Path $DestinationParent -Force | Out-Null
             Copy-Item -Path $_.FullName -Destination $Destination -Force
         }
+}
+
+function Download-LicenseText {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+
+    $DestinationParent = Split-Path $Destination -Parent
+    New-Item -ItemType Directory -Path $DestinationParent -Force | Out-Null
+    try {
+        Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing
+    }
+    catch {
+        throw "Required open-source license text could not be downloaded from $Url. Release build stopped. $($_.Exception.Message)"
+    }
+    if (-not (Test-Path $Destination) -or (Get-Item $Destination).Length -lt 1000) {
+        throw "Downloaded license text is missing or unexpectedly small: $Destination"
+    }
 }
 
 if (-not (Test-Path $Python)) {
@@ -165,6 +187,16 @@ if (Test-Path $QtLicensesDir) {
     Copy-Item -Path $QtLicensesDir -Destination (Join-Path $QtPackageOutput "Qt-LICENSES") -Recurse -Force
 }
 
+# PyPI wheels may expose only the commercial-license reference file in their
+# dist-info licenses directory even though the same wheel is valid for the
+# LGPL/GPL community licensing options. RR-V distributes under the LGPLv3
+# option, so always include the exact LGPLv3 and GPLv3 texts from Qt 6.11.1.
+$QtOpenSourceLicenseDir = Join-Path $QtPackageOutput "OpenSource-License-Texts"
+$QtLgplFile = Join-Path $QtOpenSourceLicenseDir "LGPL-3.0-only.txt"
+$QtGplFile = Join-Path $QtOpenSourceLicenseDir "GPL-3.0-only.txt"
+Download-LicenseText -Url $QtLgplUrl -Destination $QtLgplFile
+Download-LicenseText -Url $QtGplUrl -Destination $QtGplFile
+
 $WpcLicenseOutput = Join-Path $LicenseOutputDir "WPC-runtime"
 New-Item -ItemType Directory -Path $WpcLicenseOutput -Force | Out-Null
 Get-ChildItem -Path $WpcRuntimeDir -Directory -Filter "*.dist-info" |
@@ -175,11 +207,22 @@ if (Test-Path $WpcLockFile) {
     Copy-Item -Path $WpcLockFile -Destination (Join-Path $WpcLicenseOutput "WPC_RUNTIME_LOCK.txt") -Force
 }
 
+# RR-V Auth Helper is AGPL-3.0-only. nodriver 0.50.3 carries the complete AGPL
+# text in the exact bundled WPC runtime, so copy that verbatim beside the
+# Helper's preferred source form instead of relying only on a web link.
+$NoDriverAgplSource = Join-Path $WpcRuntimeDir "nodriver-0.50.3.dist-info\licenses\LICENSE.txt"
+$HelperAgplFile = Join-Path $HelperSourceOutputDir "AGPL-3.0.txt"
+if (-not (Test-Path $NoDriverAgplSource)) {
+    throw "nodriver AGPL license text is missing from the prepared WPC runtime: $NoDriverAgplSource"
+}
+Copy-Item -Path $NoDriverAgplSource -Destination $HelperAgplFile -Force
+
 $ManifestLines = @(
     "RR-V 1.2.0 build license manifest",
     "Generated: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss K'))",
     "Python: $PythonVersion",
     "PySide6 / Qt for Python: $PySideVersion",
+    "Qt LGPL/GPL license text source tag: qt/qtbase v$QtVersion",
     "PyInstaller build tool: $PyInstallerVersion",
     "",
     "WPC runtime lock:"
@@ -216,8 +259,11 @@ $RequiredReleaseFiles = @(
     (Join-Path $MainOutputDir "SOURCE_OFFER.txt"),
     (Join-Path $LicenseOutputDir "Python-LICENSE.txt"),
     (Join-Path $LicenseOutputDir "BUILD_LICENSE_MANIFEST.txt"),
+    $QtLgplFile,
+    $QtGplFile,
     (Join-Path $HelperSourceOutputDir "main.py"),
-    (Join-Path $HelperSourceOutputDir "LICENSE_NOTICE.txt")
+    (Join-Path $HelperSourceOutputDir "LICENSE_NOTICE.txt"),
+    $HelperAgplFile
 )
 $MissingReleaseFiles = @($RequiredReleaseFiles | Where-Object { -not (Test-Path $_) })
 if ($MissingReleaseFiles.Count -gt 0) {
