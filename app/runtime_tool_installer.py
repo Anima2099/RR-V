@@ -12,10 +12,10 @@ import sys
 import tempfile
 from typing import Callable
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 import zipfile
 
 from app.constants import APP_VERSION
+from app.http_client import download_https_file, fetch_https_bytes
 from app.paths import RRV_TOOLS_DIR, find_executable
 from app.tool_manager import update_deno, update_ffmpeg_release, update_ytdlp
 from app.tool_sources import DENO_LATEST_API, YTDLP_LATEST_API
@@ -37,16 +37,18 @@ def _creation_flags() -> int:
 
 
 def _fetch_release_asset(api_url: str, asset_name: str) -> ReleaseAsset:
-    request = Request(
-        api_url,
-        headers={
-            "User-Agent": f"RR-V/{APP_VERSION}",
-            "Accept": "application/vnd.github+json",
-            "Cache-Control": "no-cache",
-        },
+    payload = json.loads(
+        fetch_https_bytes(
+            api_url,
+            headers={
+                "User-Agent": f"RR-V/{APP_VERSION}",
+                "Accept": "application/vnd.github+json",
+                "Cache-Control": "no-cache",
+            },
+            timeout=15,
+            max_bytes=2 * 1024 * 1024,
+        ).decode("utf-8")
     )
-    with urlopen(request, timeout=15) as response:
-        payload = json.loads(response.read(2 * 1024 * 1024).decode("utf-8"))
 
     if not isinstance(payload, dict):
         raise ValueError("릴리스 응답 형식을 확인하지 못했습니다.")
@@ -111,41 +113,36 @@ def _download_asset(
     label: str,
     progress: ProgressCallback | None,
 ) -> None:
-    request = Request(
+    last_percent = -1
+    last_downloaded_mb = -1
+
+    def report(downloaded: int, total: int) -> None:
+        nonlocal last_percent, last_downloaded_mb
+        if progress is None:
+            return
+        if total > 0:
+            percent = max(0, min(100, int(downloaded * 100 / total)))
+            if percent == last_percent:
+                return
+            last_percent = percent
+        else:
+            downloaded_mb = int(downloaded / (1024 * 1024))
+            if downloaded > 0 and downloaded_mb == last_downloaded_mb:
+                return
+            last_downloaded_mb = downloaded_mb
+        progress(_download_progress_text(label, downloaded, total))
+
+    download_https_file(
         asset.url,
+        destination,
         headers={
             "User-Agent": f"RR-V/{APP_VERSION}",
             "Accept": "application/octet-stream, application/zip;q=0.9, */*;q=0.1",
             "Cache-Control": "no-cache",
         },
+        timeout=60,
+        progress=report,
     )
-
-    with urlopen(request, timeout=60) as response, destination.open("wb") as output:
-        try:
-            total = int(response.headers.get("Content-Length") or 0)
-        except (TypeError, ValueError):
-            total = 0
-
-        downloaded = 0
-        last_percent = -1
-        if progress is not None:
-            progress(_download_progress_text(label, 0, total))
-
-        while True:
-            chunk = response.read(1024 * 1024)
-            if not chunk:
-                break
-            output.write(chunk)
-            downloaded += len(chunk)
-
-            if progress is None:
-                continue
-            if total > 0:
-                percent = max(0, min(100, int(downloaded * 100 / total)))
-                if percent == last_percent:
-                    continue
-                last_percent = percent
-            progress(_download_progress_text(label, downloaded, total))
 
     if asset.sha256:
         if progress is not None:
