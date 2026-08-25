@@ -1,27 +1,23 @@
-RR-V 1.1.2 packaging seed tools
+RR-V 1.2.0 runtime tools directory
 
-Final one-file packaging requires these four explicit release binaries in this folder:
+Starting with RR-V 1.2.0, third-party executable tools are NOT bundled with the RR-V package.
+Do not place release seed binaries in this directory for packaging.
 
-  yt-dlp.exe   (latest tested Nightly build)
-  ffmpeg.exe
-  ffprobe.exe
-  deno.exe     (Deno 2.3.0 or newer; current tested version recommended)
-
-RR-V.spec intentionally stops the build if any of them is missing.
-They are bundled as seed/recovery copies only.
-At runtime RR-V copies missing tools to:
+RR-V installs and manages these tools at runtime under:
 
   %LOCALAPPDATA%\RR-V\tools
 
-RR-V then executes only the LocalAppData copies, so yt-dlp Nightly updates,
-Deno updates, and tool replacement persist independently of the one-file executable.
+Managed runtime tools:
 
-YouTube support in RR-V 1.1.2:
-- yt-dlp uses its current default YouTube client selection.
-- Deno is supplied to yt-dlp as its JavaScript runtime for YouTube challenges.
-- RR-V-managed YouTube login is the primary authentication method.
-- The advanced cookie folder remains available as a manual fallback.
-- WPC/nodriver support is prepared separately with PREP_WPC_PROVIDER.ps1.
+  yt-dlp.exe
+  ffmpeg.exe
+  ffprobe.exe
+  deno.exe
 
-For public distribution, create/review THIRD_PARTY_NOTICES.txt and preserve
-the exact license/source information that corresponds to the binaries placed here.
+When a required tool is missing, Settings > Tools & Resources shows
+"필수 구성요소 설치" and downloads the required tool from its upstream distribution source.
+Existing tools can be refreshed through the same Tools & Resources screen.
+
+The files in %LOCALAPPDATA%\RR-V\tools are runtime-managed copies and are not Git repository content.
+
+YouTube authentication/WPC support is prepared separately and is not part of this runtime tools directory.
