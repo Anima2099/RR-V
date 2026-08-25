@@ -10,6 +10,7 @@ from app.settings_store import get_settings
 
 AUTH_WINDOW_WIDTH = 560
 AUTH_WINDOW_HEIGHT = 760
+SUPPORTED_LOGIN_BROWSER_KEYS = frozenset({"chrome", "edge"})
 
 
 @dataclass(slots=True, frozen=True)
@@ -44,19 +45,15 @@ def detect_chromium_browsers() -> tuple[BrowserOption, ...]:
     pfx86 = Path(env.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"))
     local = Path(env.get("LOCALAPPDATA", str(Path.home())))
 
+    # Site authentication is intentionally limited to the two browsers that
+    # RR-V actively supports and regression-tests.
     raw = [
         ("chrome", "Google Chrome", pf / "Google/Chrome/Application/chrome.exe"),
         ("chrome", "Google Chrome", pfx86 / "Google/Chrome/Application/chrome.exe"),
         ("chrome", "Google Chrome", local / "Google/Chrome/Application/chrome.exe"),
-        ("vivaldi", "Vivaldi", local / "Vivaldi/Application/vivaldi.exe"),
-        ("vivaldi", "Vivaldi", pf / "Vivaldi/Application/vivaldi.exe"),
-        ("vivaldi", "Vivaldi", pfx86 / "Vivaldi/Application/vivaldi.exe"),
         ("edge", "Microsoft Edge", pfx86 / "Microsoft/Edge/Application/msedge.exe"),
         ("edge", "Microsoft Edge", pf / "Microsoft/Edge/Application/msedge.exe"),
         ("edge", "Microsoft Edge", local / "Microsoft/Edge/Application/msedge.exe"),
-        ("brave", "Brave", pf / "BraveSoftware/Brave-Browser/Application/brave.exe"),
-        ("brave", "Brave", pfx86 / "BraveSoftware/Brave-Browser/Application/brave.exe"),
-        ("brave", "Brave", local / "BraveSoftware/Brave-Browser/Application/brave.exe"),
     ]
 
     found: list[BrowserOption] = []
@@ -72,13 +69,16 @@ def detect_chromium_browsers() -> tuple[BrowserOption, ...]:
 def load_preferred_browser_key() -> str:
     settings = get_settings()
     value = str(settings.value("general/site_login_browser", "") or "").strip().lower()
-    if value:
+    if value in SUPPORTED_LOGIN_BROWSER_KEYS:
         return value
-    return str(settings.value("general/youtube_login_browser", "") or "").strip().lower()
+
+    legacy = str(settings.value("general/youtube_login_browser", "") or "").strip().lower()
+    return legacy if legacy in SUPPORTED_LOGIN_BROWSER_KEYS else ""
 
 
 def save_preferred_browser_key(browser_key: str) -> None:
-    key = str(browser_key).strip().lower()
+    requested = str(browser_key).strip().lower()
+    key = requested if requested in SUPPORTED_LOGIN_BROWSER_KEYS else ""
     settings = get_settings()
     settings.setValue("general/site_login_browser", key)
     settings.setValue("general/youtube_login_browser", key)
