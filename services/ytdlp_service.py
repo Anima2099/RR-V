@@ -25,6 +25,7 @@ from app.paths import (
     wpc_provider_runtime_ready,
 )
 from core.media_info import MediaInfo
+from services.cookie_work_file import prepare_cookie_work_copy
 from services.instagram_auth_service import load_instagram_user_agent
 
 
@@ -356,6 +357,14 @@ class YtDlpService:
         return YtDlpService._matches_host(url, "tiktok.com")
 
     @staticmethod
+    def _append_protected_cookie_argument(command: list[str], cookie_file: Path) -> None:
+        # yt-dlp saves its cookie jar back to the file passed with --cookies.
+        # RR-V login files are the source of truth, so give yt-dlp a disposable
+        # work copy and keep the saved authentication file immutable.
+        work_copy = prepare_cookie_work_copy(cookie_file)
+        command.extend(["--cookies", str(work_copy)])
+
+    @staticmethod
     def extend_runtime_and_auth_arguments(command: list[str], url: str) -> None:
         if YtDlpService.is_youtube_url(url):
             deno = find_executable("deno.exe")
@@ -367,23 +376,35 @@ class YtDlpService:
             if wpc_provider_runtime_ready():
                 command.extend(["--no-plugin-dirs", "--plugin-dirs", str(RRV_WPC_PROVIDER_DIR)])
 
-            # RR-V 전용 로그인에서 만든 인증 파일을 가장 먼저 사용한다.
-            # 갱신 실패 시 기존 파일을 유지하므로 마지막 정상 인증으로 계속 동작할 수 있다.
+            # RR-V 전용 로그인 파일은 원본을 보존하고 작업용 복사본만 yt-dlp에
+            # 전달한다. yt-dlp가 쿠키를 갱신/삭제해도 다음 작업은 저장된 원본에서
+            # 다시 시작한다.
             if RRV_YOUTUBE_AUTH_COOKIE_PATH.is_file():
-                command.extend(["--cookies", str(RRV_YOUTUBE_AUTH_COOKIE_PATH)])
+                YtDlpService._append_protected_cookie_argument(
+                    command,
+                    RRV_YOUTUBE_AUTH_COOKIE_PATH,
+                )
                 return
 
         if YtDlpService.is_instagram_url(url) and RRV_INSTAGRAM_AUTH_COOKIE_PATH.is_file():
-            command.extend(["--cookies", str(RRV_INSTAGRAM_AUTH_COOKIE_PATH)])
+            YtDlpService._append_protected_cookie_argument(
+                command,
+                RRV_INSTAGRAM_AUTH_COOKIE_PATH,
+            )
             user_agent = load_instagram_user_agent()
             if user_agent:
                 command.extend(["--user-agent", user_agent])
             return
 
         if YtDlpService.is_tiktok_url(url) and RRV_TIKTOK_AUTH_COOKIE_PATH.is_file():
-            command.extend(["--cookies", str(RRV_TIKTOK_AUTH_COOKIE_PATH)])
+            YtDlpService._append_protected_cookie_argument(
+                command,
+                RRV_TIKTOK_AUTH_COOKIE_PATH,
+            )
             return
 
+        # Manually supplied cookie files keep their previous behavior. RR-V's
+        # own login files above are the credentials that must never be mutated.
         cookie_file = YtDlpService._find_cookie_file(url)
         if cookie_file is not None:
             command.extend(["--cookies", str(cookie_file)])
