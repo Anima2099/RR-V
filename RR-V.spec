@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# RR-V 1.1.2 release spec
+# RR-V 1.2.0 community beta packaging spec
 
 from pathlib import Path
 
@@ -7,7 +7,6 @@ PROJECT_ROOT = Path(SPECPATH).resolve()
 RESOURCES_DIR = PROJECT_ROOT / "resources"
 ICONS_DIR = RESOURCES_DIR / "icons"
 THEMES_DIR = RESOURCES_DIR / "themes"
-TOOLS_DIR = RESOURCES_DIR / "tools"
 WPC_PROVIDER_DIR = RESOURCES_DIR / "wpc-provider"
 WPC_RUNTIME_DIR = WPC_PROVIDER_DIR / "runtime"
 WPC_LOCK_FILE = WPC_PROVIDER_DIR / "WPC_RUNTIME_LOCK.txt"
@@ -42,12 +41,6 @@ REQUIRED_ICON_FILES = (
     "spin_up.svg",
     "stop.svg",
 )
-REQUIRED_TOOL_FILES = (
-    "yt-dlp.exe",
-    "ffmpeg.exe",
-    "ffprobe.exe",
-    "deno.exe",
-)
 
 required_files = [
     THEME_FILE,
@@ -58,7 +51,6 @@ required_files = [
 ]
 required_files.extend(WPC_RUNTIME_DIR / name / "METADATA" for name in LOCKED_WPC_DIST_INFO)
 required_files.extend(ICONS_DIR / name for name in REQUIRED_ICON_FILES)
-required_files.extend(TOOLS_DIR / name for name in REQUIRED_TOOL_FILES)
 BROWSER_EXTENSION_FILES = (
     "manifest.json",
     "background.js",
@@ -96,12 +88,12 @@ if wpc_cache_files or wpc_cache_dirs:
         "PREP_WPC_PROVIDER.ps1을 다시 실행하세요."
     )
 
-# 리소스는 소스 실행 때와 같은 resources/... 구조로 번들 안에 넣는다.
+# 외부 실행 도구(yt-dlp/FFmpeg/FFprobe/Deno)는 1.2.0부터 번들하지 않는다.
+# 사용자가 RR-V 실행 후 도구 및 리소스 화면에서 각 공식 배포처로부터 설치한다.
 datas = [
     (str(THEME_FILE), "resources/themes"),
 ]
 datas.extend((str(ICONS_DIR / name), "resources/icons") for name in REQUIRED_ICON_FILES)
-datas.extend((str(TOOLS_DIR / name), "resources/tools") for name in REQUIRED_TOOL_FILES)
 datas.append((str(WPC_PROVIDER_DIR), "resources/wpc-provider"))
 datas.extend(
     (str(BROWSER_EXTENSION_DIR / name), "resources/browser-extension/rrv-chromium")
