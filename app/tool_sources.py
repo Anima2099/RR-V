@@ -21,5 +21,6 @@ FFMPEG_RELEASE_SHA256_URL = (
 )
 FFMPEG_RELEASES_PAGE = "https://www.gyan.dev/ffmpeg/builds/#release-builds"
 
+DENO_LATEST_API = "https://api.github.com/repos/denoland/deno/releases/latest"
 DENO_RELEASES_PAGE = "https://github.com/denoland/deno/releases"
 WPC_RELEASES_PAGE = "https://github.com/coletdjnz/yt-dlp-getpot-wpc"
