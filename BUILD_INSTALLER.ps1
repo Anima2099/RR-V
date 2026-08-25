@@ -26,6 +26,7 @@ $RequiredFiles = @(
     (Join-Path $DistRoot "RR-V.exe"),
     (Join-Path $DistRoot "RR-V-Auth-Helper.exe"),
     (Join-Path $DistRoot "LICENSE.txt"),
+    (Join-Path $DistRoot "LICENSE.ko-KR.txt"),
     (Join-Path $DistRoot "THIRD_PARTY_NOTICES.txt"),
     (Join-Path $DistRoot "SOURCE_OFFER.txt"),
     (Join-Path $DistRoot "licenses\Python-LICENSE.txt"),
