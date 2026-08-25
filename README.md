@@ -4,7 +4,7 @@
 
 Current development version: **1.2.0 Community Beta**
 
-> The RR-V core application currently has no open-source redistribution license selected. Source is made available for inspection and development, but do not assume permission to redistribute the RR-V core source or original assets. The separately distributed `auth_helper` component has its own AGPL-3.0-only license notice.
+> The RR-V core application is **source available** under the `RR-V Source Available License 1.0`. Personal use, use as a tool in professional work, source inspection, and private modifications are permitted. Redistribution and commercial exploitation of RR-V itself require prior written permission. Separately licensed components remain governed by their own licenses.
 
 ## What RR-V does
 
@@ -164,6 +164,40 @@ See:
 The release build also generates a `licenses/` directory containing the exact available license/metadata files from the Python, PySide6/Qt, shiboken6, and locked WPC packages used by that build.
 
 External yt-dlp / FFmpeg / Deno executables downloaded after installation remain governed by their respective upstream licenses.
+
+## License
+
+### RR-V core
+
+The RR-V core is distributed under the **RR-V Source Available License 1.0**. See [`LICENSE`](LICENSE) for the complete terms.
+
+In short:
+
+- Personal use is permitted.
+- RR-V may be used as a tool in educational, research, creative, and professional work.
+- Source inspection and private modifications for your own use are permitted.
+- Sharing links to the official RR-V repository or official releases is permitted and encouraged.
+- Redistribution of RR-V or modified versions requires prior written permission.
+- Commercial exploitation of RR-V itself requires prior written permission.
+- Separately licensed and third-party components remain governed by their own licenses.
+
+RR-V is **source available**, not OSI-approved open-source software.
+
+### 한국어 요약
+
+RR-V 본체는 **RR-V Source Available License 1.0**에 따라 소스가 공개됩니다.
+
+- 개인적인 사용이 허용됩니다.
+- 교육, 연구, 창작 및 업무에서 RR-V를 도구로 사용하는 것이 허용됩니다.
+- 소스 코드를 열람하거나 개인적인 용도로 수정하여 사용하는 것이 허용됩니다.
+- 공식 RR-V 저장소 또는 공식 Release 링크를 공유하는 것은 허용되며 권장됩니다.
+- RR-V 원본 또는 수정본을 재배포하려면 저작권자의 사전 서면 허가가 필요합니다.
+- RR-V 자체를 판매, 유료 배포, 광고·구독 등 수익화 목적으로 이용하려면 사전 서면 허가가 필요합니다.
+- 별도의 라이선스가 명시된 구성요소와 제3자 소프트웨어에는 각각의 라이선스가 우선 적용됩니다.
+
+RR-V는 소스 코드를 확인할 수 있는 **Source Available** 소프트웨어이며, OSI가 정의하는 오픈소스 소프트웨어는 아닙니다.
+
+The RR-V-specific source under `auth_helper/` is separately licensed under **AGPL-3.0-only**. Third-party components retain their respective upstream licenses.
 
 ## Project status
 
