@@ -24,9 +24,9 @@ from app.constants import (
     MINIMUM_WIDTH,
 )
 from ui.pages.about_page import AboutPage
+from ui.pages.community_settings_page import CommunitySettingsPage
 from ui.pages.download_page import DownloadPage
 from ui.pages.media_tools_page import MediaToolsPage
-from ui.pages.theme_settings_page import ThemeSettingsPage
 from ui.dialogs.warm_dialogs import ask_warm_question
 from ui.sidebar import Sidebar
 
@@ -45,7 +45,7 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
         self.download_page = DownloadPage()
         self.media_tools_page = MediaToolsPage()
-        self.settings_page = ThemeSettingsPage()
+        self.settings_page = CommunitySettingsPage()
         self.about_page = AboutPage()
 
         # 1.2.0에서 프로그램 정보는 설정 탭이 아니라 사이드바의 독립 페이지로
