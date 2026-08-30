@@ -978,7 +978,7 @@ class SettingsPage(QWidget):
         if not status.supported:
             text = "Windows에서만 브라우저 연결을 사용할 수 있습니다."
         elif status.registered:
-            text = "✓ 브라우저 연결됨"
+            text = "브라우저 연결됨"
         elif status.host_executable is None:
             text = "RR-V.exe 빌드 후 브라우저 연결을 사용할 수 있습니다."
         else:
@@ -1060,7 +1060,7 @@ class SettingsPage(QWidget):
         if not checked:
             return
         save_browser_send_behavior(behavior)
-        self.browser_behavior_save_status.setText("✓ 설정이 저장되었습니다.")
+        self.browser_behavior_save_status.setText("설정이 저장되었습니다.")
         self.browser_behavior_save_timer.start(1800)
 
     def _load_browser_guide_expanded(self) -> bool:
@@ -1448,13 +1448,13 @@ class SettingsPage(QWidget):
             )
             self._set_youtube_auth_visual(
                 "ready",
-                "✓ YouTube 인증됨",
+                "YouTube 인증됨",
                 f"쿠키 {status.cookie_count}개 · 마지막 갱신 {stamp}",
             )
         elif status.exists:
             self._set_youtube_auth_visual(
                 "error",
-                "⚠ YouTube 인증 정보 확인 필요",
+                "YouTube 인증 정보 확인 필요",
                 f"쿠키 {status.cookie_count}개가 있지만 로그인 인증을 확인하지 못했습니다. 인증 갱신을 실행해 주세요.",
             )
         else:
@@ -1560,7 +1560,7 @@ class SettingsPage(QWidget):
 
         self._set_youtube_auth_visual(
             "error",
-            "⚠ YouTube 인증 실패",
+            "YouTube 인증 실패",
             result.message,
         )
         self._show_warm_message(
@@ -1593,13 +1593,13 @@ class SettingsPage(QWidget):
             )
             self._set_instagram_auth_visual(
                 "ready",
-                "✓ Instagram 인증됨",
+                "Instagram 인증됨",
                 f"로그인 세션 쿠키 {status.cookie_count}개 · {stamp}",
             )
         elif status.exists:
             self._set_instagram_auth_visual(
                 "error",
-                "⚠ Instagram 인증 정보 확인 필요",
+                "Instagram 인증 정보 확인 필요",
                 f"쿠키 {status.cookie_count}개가 있지만 로그인 세션을 확인하지 못했습니다. 인증 갱신을 실행해 주세요.",
             )
         else:
@@ -1668,7 +1668,7 @@ class SettingsPage(QWidget):
 
         self._set_instagram_auth_visual(
             "error",
-            "⚠ Instagram 인증 실패",
+            "Instagram 인증 실패",
             result.message,
         )
         self._show_warm_message(
@@ -1727,13 +1727,13 @@ class SettingsPage(QWidget):
             )
             self._set_tiktok_auth_visual(
                 "ready",
-                "✓ TikTok 인증됨",
+                "TikTok 인증됨",
                 f"로그인 세션 쿠키 {status.cookie_count}개 · {stamp}",
             )
         elif status.exists:
             self._set_tiktok_auth_visual(
                 "error",
-                "⚠ TikTok 인증 정보 확인 필요",
+                "TikTok 인증 정보 확인 필요",
                 f"쿠키 {status.cookie_count}개가 있지만 로그인 세션을 확인하지 못했습니다. 인증 갱신을 실행해 주세요.",
             )
         else:
@@ -1802,7 +1802,7 @@ class SettingsPage(QWidget):
 
         self._set_tiktok_auth_visual(
             "error",
-            "⚠ TikTok 인증 실패",
+            "TikTok 인증 실패",
             result.message,
         )
         self._show_warm_message(
@@ -1899,7 +1899,7 @@ class SettingsPage(QWidget):
             status_label = self.tool_status_labels.get(status.key)
             version_label = self.tool_version_labels.get(status.key)
             if status_label is not None:
-                status_label.setText("✓ 정상" if status.available else "✕ 없음")
+                status_label.setText("정상" if status.available else "없음")
             if version_label is not None:
                 version_label.setText(status.version)
         self.restore_tools_button.setEnabled(has_bundled_tools())
@@ -1940,7 +1940,7 @@ class SettingsPage(QWidget):
         self.ytdlp_update_button.setEnabled(True)
         self.deno_update_button.setEnabled(True)
         self.restore_tools_button.setEnabled(has_bundled_tools())
-        self.tool_action_label.setText(("✓ " if ok else "⚠ ") + message)
+        self.tool_action_label.setText(("" if ok else "") + message)
         self._refresh_tool_status()
 
     def _copy_diagnostics(self) -> None:

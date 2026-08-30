@@ -492,7 +492,7 @@ class CommunitySettingsPage(ThemeSettingsPage):
             subprocess.Popen([str(browser.path)])
         except OSError as error:
             self.browser_manager_copy_status.setText(
-                f"✓ {target} 복사됨 · {browser.label}는 직접 열어 주세요."
+                f"{target} 복사됨 · {browser.label}는 직접 열어 주세요."
             )
             show_warm_message(
                 self,
@@ -503,7 +503,7 @@ class CommunitySettingsPage(ThemeSettingsPage):
             return
 
         self.browser_manager_copy_status.setText(
-            f"✓ {target} 복사됨 · 주소창에 붙여넣고 Enter를 눌러 주세요."
+            f"{target} 복사됨 · 주소창에 붙여넣고 Enter를 눌러 주세요."
         )
         QTimer.singleShot(
             3600,
@@ -523,7 +523,7 @@ class CommunitySettingsPage(ThemeSettingsPage):
         path_text = str(RRV_BROWSER_EXTENSION_DIR.resolve())
         self.browser_extension_path_input.setText(path_text)
         QApplication.clipboard().setText(path_text)
-        self.browser_extension_copy_status.setText("✓ 확장 프로그램 경로를 복사했습니다.")
+        self.browser_extension_copy_status.setText("확장 프로그램 경로를 복사했습니다.")
         QTimer.singleShot(
             2200,
             lambda: self.browser_extension_copy_status.setText(""),

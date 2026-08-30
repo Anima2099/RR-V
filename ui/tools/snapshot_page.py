@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import re
 
-from PySide6.QtCore import QTimer, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent, QFont, QFontMetrics
+from PySide6.QtCore import QSize, QTimer, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent, QFont, QFontMetrics, QIcon
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -26,7 +26,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.notifications import play_completion_sound
-from app.paths import RRV_LOGS_DIR
+from app.paths import RRV_LOGS_DIR, SPIN_DOWN_ICON_PATH, SPIN_UP_ICON_PATH
+from app.theme import themed_icon_path
 from app.snapshot_log import snapshot_log_path
 from app.snapshot_preferences import SnapshotPreferences, load_snapshot_preferences, save_snapshot_preferences
 from core.snapshot_models import OUTPUT_CUSTOM, OUTPUT_SOURCE, SIZE_HEIGHT, SIZE_WIDTH, SnapshotOptions, SnapshotProbeResult, SnapshotResult
@@ -544,8 +545,12 @@ class SnapshotPage(QWidget):
         self.status_counter = QLabel("")
         self.status_counter.setObjectName("snapshotStatusCounter")
         top.addWidget(self.status_counter)
-        self.status_details_button = QPushButton("자세히 ▾")
+        self.status_details_button = QPushButton("자세히")
         self.status_details_button.setObjectName("snapshotStatusDetailsButton")
+        self.status_details_button.setIcon(
+            QIcon(str(themed_icon_path(SPIN_DOWN_ICON_PATH)))
+        )
+        self.status_details_button.setIconSize(QSize(12, 8))
         self.status_details_button.setCheckable(True)
         self.status_details_button.toggled.connect(self._toggle_status_details)
         top.addWidget(self.status_details_button)
@@ -897,7 +902,7 @@ class SnapshotPage(QWidget):
         self._last_output_path = result.output_path
         self.status_progress.setValue(100)
         self._set_status(
-            "✓ 생성 완료",
+            "생성 완료",
             Path(result.output_path).name,
             detail=f"{result.shot_count}장 · {result.sheet_width}×{result.sheet_height}\n{result.output_path}",
             show_progress=False,
@@ -984,7 +989,7 @@ class SnapshotPage(QWidget):
         detail = summary
         if self._last_output_path:
             detail += f"\n마지막 결과: {self._last_output_path}"
-        self._set_status("✓ 여러 영상 완료", summary, detail=detail, show_progress=False)
+        self._set_status("여러 영상 완료", summary, detail=detail, show_progress=False)
         self.open_result_button.setEnabled(bool(self._last_output_path))
         self.open_folder_button.setEnabled(bool(self._last_output_path))
         self.quick_open_result_button.setVisible(False)
@@ -1085,7 +1090,9 @@ class SnapshotPage(QWidget):
 
     def _toggle_status_details(self, expanded: bool) -> None:
         self.status_detail_frame.setVisible(expanded)
-        self.status_details_button.setText("자세히 ▴" if expanded else "자세히 ▾")
+        icon_path = SPIN_UP_ICON_PATH if expanded else SPIN_DOWN_ICON_PATH
+
+        self.status_details_button.setIcon(QIcon(str(themed_icon_path(icon_path))))
 
     def _set_status(
         self,

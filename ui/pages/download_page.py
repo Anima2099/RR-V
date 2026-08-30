@@ -36,6 +36,7 @@ from app.paths import (
     COLLAPSE_ICON_PATH,
     EXPAND_ICON_PATH,
     FOLDER_ICON_PATH,
+    RETRY_ICON_PATH,
 )
 from app.performance_log import write_performance
 from app.url_list_io import (
@@ -315,6 +316,8 @@ class DownloadPage(QWidget):
         layout.addLayout(list_header)
 
         self.list_filter_bar = QWidget()
+        # 빈 목록으로 시작할 때는 불필요한 초기 레이아웃 계산을 피한다.
+        self.list_filter_bar.setVisible(bool(self.tasks))
         filter_row = QHBoxLayout(self.list_filter_bar)
         filter_row.setContentsMargins(0, 0, 0, 0)
         filter_row.setSpacing(8)
@@ -345,8 +348,10 @@ class DownloadPage(QWidget):
         self.list_filter_group.addButton(self.all_filter_button)
         self.list_filter_group.addButton(self.failed_filter_button)
 
-        self.retry_all_failed_button = QPushButton("↻ 실패 작업 모두 재시도")
+        self.retry_all_failed_button = QPushButton("실패 작업 모두 재시도")
         self.retry_all_failed_button.setObjectName("queueRetryButton")
+        self.retry_all_failed_button.setIcon(QIcon(str(RETRY_ICON_PATH)))
+        self.retry_all_failed_button.setIconSize(QSize(18, 18))
         self.retry_all_failed_button.setToolTip(
             "실패한 작업을 다시 대기 상태로 돌리고 재시도합니다."
         )

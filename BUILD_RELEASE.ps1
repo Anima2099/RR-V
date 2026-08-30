@@ -230,7 +230,7 @@ if (-not (Test-Path $NoDriverAgplSource)) {
 Copy-Item -Path $NoDriverAgplSource -Destination $HelperAgplFile -Force
 
 $ManifestLines = @(
-    "RR-V 1.2.0 build license manifest",
+    "RR-V 1.3.0 build license manifest",
     "Generated: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss K'))",
     "Python: $PythonVersion",
     "PySide6 / Qt for Python: $PySideVersion",
@@ -261,7 +261,7 @@ $BundledExternalTools = @(
         ForEach-Object { $_.FullName }
 )
 if ($BundledExternalTools.Count -gt 0) {
-    throw ("External runtime tools must not be bundled in RR-V 1.2.0:`n" + ($BundledExternalTools -join "`n"))
+    throw ("External runtime tools must not be bundled in RR-V 1.3.0:`n" + ($BundledExternalTools -join "`n"))
 }
 
 # Qt Virtual Keyboard is GPLv3-only in the Qt 6.11 community distribution.
@@ -309,7 +309,7 @@ catch {
 }
 
 Write-Host ""
-Write-Host "RR-V 1.2.0 onedir build is ready."
+Write-Host "RR-V 1.3.0 onedir build is ready."
 Write-Host ("Output: " + $MainOutputDir)
 Write-Host "  - RR-V.exe"
 Write-Host "  - RR-V-Auth-Helper.exe"

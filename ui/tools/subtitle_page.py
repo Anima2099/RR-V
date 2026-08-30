@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent, QFontMetrics
+from PySide6.QtCore import QSize, QTimer, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent, QFontMetrics, QIcon
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -25,7 +25,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.notifications import play_completion_sound
-from app.paths import RRV_LOGS_DIR
+from app.paths import RRV_LOGS_DIR, SPIN_DOWN_ICON_PATH, SPIN_UP_ICON_PATH
+from app.theme import themed_icon_path
 from app.subtitle_log import subtitle_log_path
 from app.subtitle_preferences import SubtitlePreferences, load_subtitle_preferences, save_subtitle_preferences
 from core.subtitle_models import (
@@ -234,13 +235,13 @@ class SubtitleTaskRow(QFrame):
         if self.show_match_status:
             if task.secondary_path:
                 subtitle_name = Path(task.secondary_path).name
-                self.match_label.set_full_text(f"✓ 자막 매칭 · {subtitle_name}")
+                self.match_label.set_full_text(f"자막 매칭 · {subtitle_name}")
                 self.match_label.setProperty("matchState", "matched")
                 self.status_label.setText("대기 중")
                 self.status_label.setProperty("taskState", "pending")
                 tip = f"영상\n{task.primary_path}\n\n자막\n{task.secondary_path}"
             else:
-                self.match_label.set_full_text("⚠ 자막 없음 · 자막 파일을 추가하거나 이 영상을 목록에서 제거해 주세요")
+                self.match_label.set_full_text("자막 없음 · 자막 파일을 추가하거나 이 영상을 목록에서 제거해 주세요")
                 self.match_label.setProperty("matchState", "missing")
                 self.status_label.setText("자막 없음")
                 self.status_label.setProperty("taskState", "warning")
@@ -672,8 +673,12 @@ class SubtitlePage(QWidget):
         qa.addWidget(self.quick_open_folder_button)
         self.quick_actions.setVisible(False)
         top.addWidget(self.quick_actions)
-        self.status_details_button = QPushButton("자세히 ▾")
+        self.status_details_button = QPushButton("자세히")
         self.status_details_button.setObjectName("subtitleStatusDetailsButton")
+        self.status_details_button.setIcon(
+            QIcon(str(themed_icon_path(SPIN_DOWN_ICON_PATH)))
+        )
+        self.status_details_button.setIconSize(QSize(12, 8))
         self.status_details_button.setCheckable(True)
         self.status_details_button.clicked.connect(self._toggle_status_detail)
         top.addWidget(self.status_details_button)
@@ -1182,7 +1187,7 @@ class SubtitlePage(QWidget):
             return
         self._last_output_paths = result.output_paths
         filename = Path(result.output_paths[0]).name if result.output_paths else result.message
-        self._set_status("✓ 완료", filename, result.message + ("\n" + "\n".join(result.output_paths) if result.output_paths else ""), False)
+        self._set_status("완료", filename, result.message + ("\n" + "\n".join(result.output_paths) if result.output_paths else ""), False)
         self._show_quick_actions()
         if self._operation == OP_SYNC:
             self.sync_spin.setValue(0)
@@ -1263,7 +1268,7 @@ class SubtitlePage(QWidget):
 
     def _batch_completed(self, success: int, failed: int) -> None:
         summary = f"성공 {success}개 · 실패 {failed}개"
-        self._set_status("✓ 여러 작업 완료", summary, summary, False)
+        self._set_status("여러 작업 완료", summary, summary, False)
         self.status_counter.setText(f"{self._batch_total} / {self._batch_total}")
         self._show_quick_actions(batch=True)
         if success > 0 and failed == 0:
@@ -1305,7 +1310,9 @@ class SubtitlePage(QWidget):
 
     def _toggle_status_detail(self, checked: bool) -> None:
         self.status_detail.setVisible(bool(checked))
-        self.status_details_button.setText("자세히 ▴" if checked else "자세히 ▾")
+        icon_path = SPIN_UP_ICON_PATH if checked else SPIN_DOWN_ICON_PATH
+
+        self.status_details_button.setIcon(QIcon(str(themed_icon_path(icon_path))))
 
     def _open_result(self) -> None:
         if self._last_output_paths:

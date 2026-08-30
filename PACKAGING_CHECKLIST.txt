@@ -1,4 +1,4 @@
-RR-V 1.2.0 community beta release checklist
+RR-V 1.3.0 community beta release checklist
 
 Release rule
 [ ] Keep the development source folder separate from build/dist output.
@@ -6,8 +6,8 @@ Release rule
 [ ] Remove temporary patch/test files from the release source folder.
 
 Before build
-[ ] app\constants.py shows APP_VERSION = "1.2.0"
-[ ] RR-V.version_info.txt shows FileVersion/ProductVersion 1.2.0
+[ ] app\constants.py shows APP_VERSION = "1.3.0" and APP_RELEASE_CHANNEL = "beta"
+[ ] RR-V.version_info.txt shows FileVersion/ProductVersion 1.3.0
 [ ] resources\icons\RR-V.ico and RR-V.png are the intended release icons
 [ ] LICENSE contains RR-V Source Available License 1.0
 [ ] LICENSE.ko-KR.txt is present and identifies the English LICENSE as authoritative
@@ -112,10 +112,10 @@ YouTube / site authentication regression
 [ ] Manual cookie-folder fallback still works where valid
 
 UI regression
-[ ] Version display shows 1.2.0
+[ ] Version display shows 1.3.0
 [ ] Light and dark Warm Sage themes both render normally
 [ ] Settings contains six tabs and no duplicate Program Information tab
-[ ] Sidebar Program Information sits directly above Version 1.2.0 in the lower app-info area
+[ ] Sidebar Program Information sits directly above Version 1.3.0 in the lower app-info area
 [ ] Program Information shows RR-V version, update check, developer/contact, GitHub, support, and license/source links
 [ ] Tools & Resources shows yt-dlp / FFmpeg / Deno / YouTube authentication runtime status
 [ ] Tools & Resources can install missing external runtime tools
@@ -157,4 +157,4 @@ License / distribution boundary
 [ ] PySide6 / Qt LGPL notices and exact package metadata are preserved
 [ ] SOURCE_OFFER.txt remains valid and the contact address is current
 [ ] Official download sources for yt-dlp Nightly, FFmpeg Release Essentials, and Deno match app\tool_sources.py
-[ ] Archive the exact RR-V 1.2.0 source commit, specs, build script, WPC lock, browser extension, final onedir build, and Installer
+[ ] Archive the exact RR-V 1.3.0 source commit, specs, build script, WPC lock, browser extension, final onedir build, and Installer

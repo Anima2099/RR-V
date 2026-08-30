@@ -60,12 +60,12 @@ class UnifiedSettingsPage(CommunitySettingsPage):
             self.tool_version_labels[key].setText(version)
             issue_kind = self._status_issue_kind(status)
             if issue_kind == "normal":
-                self._set_tool_visual(key, "normal", "✓ 정상")
+                self._set_tool_visual(key, "normal", "정상")
             elif issue_kind == "missing":
-                self._set_tool_visual(key, "error", "✕ 설치 필요")
+                self._set_tool_visual(key, "error", "설치 필요")
                 missing.add(key)
             else:
-                self._set_tool_visual(key, "error", "⚠ 복구 필요")
+                self._set_tool_visual(key, "error", "복구 필요")
                 repair.add(key)
 
         apply_single("ytdlp", statuses.get("ytdlp"))
@@ -90,14 +90,14 @@ class UnifiedSettingsPage(CommunitySettingsPage):
             else:
                 version_text = f"ffmpeg {ffmpeg_version} / ffprobe {ffprobe_version}"
             self.tool_version_labels["ffmpeg"].setText(version_text)
-            self._set_tool_visual("ffmpeg", "normal", "✓ 정상")
+            self._set_tool_visual("ffmpeg", "normal", "정상")
         else:
             ffmpeg_kind = self._status_issue_kind(ffmpeg)
             ffprobe_kind = self._status_issue_kind(ffprobe)
             both_missing = ffmpeg_kind == "missing" and ffprobe_kind == "missing"
             if both_missing:
                 self.tool_version_labels["ffmpeg"].setText("없음")
-                self._set_tool_visual("ffmpeg", "error", "✕ 설치 필요")
+                self._set_tool_visual("ffmpeg", "error", "설치 필요")
                 missing.add("ffmpeg")
             else:
                 ffmpeg_text = str(
@@ -109,7 +109,7 @@ class UnifiedSettingsPage(CommunitySettingsPage):
                 self.tool_version_labels["ffmpeg"].setText(
                     f"ffmpeg {ffmpeg_text} / ffprobe {ffprobe_text}"
                 )
-                self._set_tool_visual("ffmpeg", "error", "⚠ 복구 필요")
+                self._set_tool_visual("ffmpeg", "error", "복구 필요")
                 repair.add("ffmpeg")
 
         apply_single("deno", statuses.get("deno"))
@@ -223,11 +223,11 @@ class UnifiedSettingsPage(CommunitySettingsPage):
         )
 
         if startup_changed:
-            message = "✓ 다른 변경사항은 저장되었습니다. Windows 자동 실행 설정은 적용되지 않았습니다."
+            message = "다른 변경사항은 저장되었습니다. Windows 자동 실행 설정은 적용되지 않았습니다."
         elif theme_restart_needed:
-            message = "✓ 변경사항 저장됨 · 화면 테마는 RR-V 재시작 후 적용됩니다."
+            message = "변경사항 저장됨 · 화면 테마는 RR-V 재시작 후 적용됩니다."
         else:
-            message = "✓ 변경사항이 저장되었습니다."
+            message = "변경사항이 저장되었습니다."
 
         self.general_tab_save_status.setText(message)
         QTimer.singleShot(

@@ -3,9 +3,12 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 import threading
+import weakref
 
 from PySide6.QtCore import QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
+from shiboken6 import isValid
+
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFileDialog,
@@ -491,10 +494,10 @@ class ThemeSettingsPage(SettingsPage):
             return
 
         previous_text = self.tool_action_label.text()
-        self.tool_action_label.setText(f"✓ TXT 저장 완료 · {target.name}")
+        self.tool_action_label.setText(f"TXT 저장 완료 · {target.name}")
 
         def restore_status() -> None:
-            if self.tool_action_label.text().startswith("✓ TXT 저장 완료"):
+            if self.tool_action_label.text().startswith("TXT 저장 완료"):
                 self.tool_action_label.setText(previous_text)
 
         QTimer.singleShot(3200, restore_status)
@@ -560,12 +563,12 @@ class ThemeSettingsPage(SettingsPage):
             self.tool_version_labels[key].setText(version)
             issue_kind = self._status_issue_kind(status)
             if issue_kind == "normal":
-                self._set_tool_visual(key, "normal", "✓ 정상")
+                self._set_tool_visual(key, "normal", "정상")
             elif issue_kind == "missing":
-                self._set_tool_visual(key, "error", "✕ 설치 필요")
+                self._set_tool_visual(key, "error", "설치 필요")
                 missing.add(key)
             else:
-                self._set_tool_visual(key, "error", "⚠ 복구 필요")
+                self._set_tool_visual(key, "error", "복구 필요")
                 repair.add(key)
 
         apply_single("ytdlp", statuses.get("ytdlp"))
@@ -581,14 +584,14 @@ class ThemeSettingsPage(SettingsPage):
             else:
                 version_text = f"ffmpeg {ffmpeg_version} / ffprobe {ffprobe_version}"
             self.tool_version_labels["ffmpeg"].setText(version_text)
-            self._set_tool_visual("ffmpeg", "normal", "✓ 정상")
+            self._set_tool_visual("ffmpeg", "normal", "정상")
         else:
             ffmpeg_kind = self._status_issue_kind(ffmpeg)
             ffprobe_kind = self._status_issue_kind(ffprobe)
             both_missing = ffmpeg_kind == "missing" and ffprobe_kind == "missing"
             if both_missing:
                 self.tool_version_labels["ffmpeg"].setText("없음")
-                self._set_tool_visual("ffmpeg", "error", "✕ 설치 필요")
+                self._set_tool_visual("ffmpeg", "error", "설치 필요")
                 missing.add("ffmpeg")
             else:
                 ffmpeg_text = str(getattr(ffmpeg, "version", "확인 불가") or "확인 불가")
@@ -596,7 +599,7 @@ class ThemeSettingsPage(SettingsPage):
                 self.tool_version_labels["ffmpeg"].setText(
                     f"ffmpeg {ffmpeg_text} / ffprobe {ffprobe_text}"
                 )
-                self._set_tool_visual("ffmpeg", "error", "⚠ 복구 필요")
+                self._set_tool_visual("ffmpeg", "error", "복구 필요")
                 repair.add("ffmpeg")
 
         apply_single("deno", statuses.get("deno"))
@@ -631,12 +634,24 @@ class ThemeSettingsPage(SettingsPage):
             self.component_check_button.setEnabled(False)
             self.component_update_status.setText("최신 버전 확인 중…")
 
+        page_ref = weakref.ref(self)
+
         def run() -> None:
             try:
                 result = check_component_updates(force=force)
             except Exception:
                 result = ComponentUpdateCheckResult(components=())
-            self.component_check_finished.emit(result, notify)
+
+            page = page_ref()
+            if page is None or not isValid(page):
+                return
+            try:
+                page.component_check_finished.emit(result, notify)
+            except RuntimeError:
+                # The Qt object can be deleted between isValid() and emit() while
+                # the application is shutting down. In that case there is no UI
+                # left to receive the result, so ending the daemon worker is safe.
+                return
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -656,7 +671,7 @@ class ThemeSettingsPage(SettingsPage):
                 self.component_update_status.setText(issue_message)
             else:
                 self.component_update_status.setText(
-                    "✓ 오늘 이미 자동 확인했습니다. 도구가 바뀌면 다음 실행에서 다시 확인합니다."
+                    "오늘 이미 자동 확인했습니다. 도구가 바뀌면 다음 실행에서 다시 확인합니다."
                 )
             return
 
@@ -681,10 +696,10 @@ class ThemeSettingsPage(SettingsPage):
                 self._set_tool_visual(
                     component.key,
                     "update",
-                    "✕ 설치 필요" if installing else "↑ 업데이트 가능",
+                    "설치 필요" if installing else "↑ 업데이트 가능",
                 )
             else:
-                self._set_tool_visual(component.key, "normal", "✓ 최신")
+                self._set_tool_visual(component.key, "normal", "최신")
 
         updates = result.updates
         failed_count = len(result.errors)
@@ -700,7 +715,7 @@ class ThemeSettingsPage(SettingsPage):
                 "확인 가능한 도구는 최신입니다. 일부 서버 확인은 실패했습니다."
             )
         else:
-            self.component_update_status.setText("✓ 주요 도구가 최신 상태입니다.")
+            self.component_update_status.setText("주요 도구가 최신 상태입니다.")
 
         if not notify or not updates:
             return
@@ -805,11 +820,11 @@ class ThemeSettingsPage(SettingsPage):
         if hasattr(self, "tool_action_label"):
             if ok:
                 self.tool_action_label.setText(
-                    "✓ 도구 확인이 완료되었습니다. 상세 결과를 보거나 TXT로 내보낼 수 있습니다."
+                    "도구 확인이 완료되었습니다. 상세 결과를 보거나 TXT로 내보낼 수 있습니다."
                 )
             else:
                 self.tool_action_label.setText(
-                    "⚠ 일부 도구 작업에 문제가 있었습니다. 상세 결과의 진단 코드를 확인해 주세요."
+                    "일부 도구 작업에 문제가 있었습니다. 상세 결과의 진단 코드를 확인해 주세요."
                 )
 
         self._refresh_tool_status()

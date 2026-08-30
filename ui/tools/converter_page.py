@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QTimer, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent
+from PySide6.QtCore import QSize, QTimer, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QDragEnterEvent, QDropEvent, QIcon
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFileDialog,
@@ -47,8 +47,9 @@ from app.converter_preferences import (
 )
 from app.general_preferences import FILE_COLLISION_OVERWRITE, load_general_preferences
 from app.notifications import play_completion_sound
-from app.paths import RRV_LOGS_DIR
+from app.paths import RRV_LOGS_DIR, SPIN_DOWN_ICON_PATH, SPIN_UP_ICON_PATH
 from core.converter_models import ConversionOptions, VideoProbeResult
+from app.theme import themed_icon_path
 from ui.widgets.common import (
     NoWheelComboBox,
     NoWheelDoubleSpinBox,
@@ -635,8 +636,12 @@ class ConverterPage(QWidget):
         self.status_counter = QLabel("")
         self.status_counter.setObjectName("converterStatusCounter")
         summary.addWidget(self.status_counter)
-        self.details_button = QPushButton("자세히 ▾")
+        self.details_button = QPushButton("자세히")
         self.details_button.setObjectName("converterStatusDetailsButton")
+        self.details_button.setIcon(
+            QIcon(str(themed_icon_path(SPIN_DOWN_ICON_PATH)))
+        )
+        self.details_button.setIconSize(QSize(12, 8))
         self.details_button.setCheckable(True)
         self.details_button.toggled.connect(self._toggle_status_details)
         summary.addWidget(self.details_button)
@@ -1303,7 +1308,8 @@ class ConverterPage(QWidget):
 
     def _toggle_status_details(self, expanded: bool) -> None:
         self.status_detail_frame.setVisible(bool(expanded))
-        self.details_button.setText("자세히 ▴" if expanded else "자세히 ▾")
+        icon_path = SPIN_UP_ICON_PATH if expanded else SPIN_DOWN_ICON_PATH
+        self.details_button.setIcon(QIcon(str(themed_icon_path(icon_path))))
 
     def _set_status(self, summary: str, detail: str | None = None, *, show_progress: bool | None = None) -> None:
         self.status_label.setText(summary)
