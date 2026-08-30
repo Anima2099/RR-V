@@ -25,7 +25,10 @@ from app.paths import (
     wpc_provider_runtime_ready,
 )
 from core.media_info import MediaInfo
-from services.cookie_work_file import prepare_cookie_work_copy
+from services.cookie_work_file import (
+    cleanup_cookie_work_copy_from_command,
+    prepare_cookie_work_copy,
+)
 from services.instagram_auth_service import load_instagram_user_agent
 
 
@@ -127,6 +130,7 @@ class YtDlpService:
                 stderr="",
                 failure_detail=detail,
             )
+            cleanup_cookie_work_copy_from_command(command)
             raise MediaAnalysisError(
                 "yt-dlp.exe를 실행하지 못했습니다.",
                 detail,
@@ -150,6 +154,7 @@ class YtDlpService:
         finally:
             with self._process_lock:
                 self._process = None
+            cleanup_cookie_work_copy_from_command(command)
 
         if cancel_event.is_set():
             raise AnalysisCancelledError("영상 정보 확인 취소됨")
