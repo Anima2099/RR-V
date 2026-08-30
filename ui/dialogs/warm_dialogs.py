@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -179,6 +180,36 @@ class WarmChoiceDialog(_WarmBaseDialog):
         self.combo.setFocus()
 
 
+class WarmReportDialog(_WarmBaseDialog):
+    def __init__(
+        self,
+        title: str,
+        report: str,
+        parent: QWidget | None = None,
+        *,
+        message: str = "",
+    ) -> None:
+        super().__init__(title, message, parent, minimum_width=620)
+        self.setMaximumWidth(920)
+        self.resize(760, 560)
+
+        report_view = QPlainTextEdit()
+        report_view.setObjectName("diagnosticReportView")
+        report_view.setReadOnly(True)
+        report_view.setPlainText(report)
+        report_view.setMinimumHeight(360)
+        self.root_layout.addWidget(report_view, 1)
+
+        row = self._button_row()
+        close_button = QPushButton("닫기")
+        close_button.setObjectName("primaryButton")
+        close_button.clicked.connect(self.accept)
+        row.addWidget(close_button)
+        self.root_layout.addLayout(row)
+        close_button.setDefault(True)
+        close_button.setFocus()
+
+
 def show_warm_message(
     parent: QWidget | None,
     title: str,
@@ -187,6 +218,16 @@ def show_warm_message(
     button_text: str = "확인",
 ) -> None:
     WarmMessageDialog(title, message, parent, button_text=button_text).exec()
+
+
+def show_warm_report(
+    parent: QWidget | None,
+    title: str,
+    report: str,
+    *,
+    message: str = "",
+) -> None:
+    WarmReportDialog(title, report, parent, message=message).exec()
 
 
 def ask_warm_question(
