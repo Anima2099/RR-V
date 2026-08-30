@@ -151,6 +151,14 @@ class AppUpdateChannelTests(unittest.TestCase):
         self.assertEqual(asset.name, "RR-V_Setup_1.4.0.exe")  # type: ignore[union-attr]
         self.assertEqual(asset.sha256, "a" * 64)  # type: ignore[union-attr]
 
+    def test_installer_asset_rejects_setup_from_other_version(self) -> None:
+        release = self._release(
+            "v1.4.0-community-beta",
+            prerelease=True,
+            assets=[self._asset("1.3.0")],
+        )
+        self.assertIsNone(_installer_asset_from_release(release))
+
     @patch("app.app_update.fetch_https_bytes")
     def test_current_beta_can_update_to_same_version_stable(self, fetch) -> None:  # type: ignore[no-untyped-def]
         payload = [self._release("v1.3.0", prerelease=False)]
