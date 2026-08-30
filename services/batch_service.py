@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 
 from app.paths import RRV_TOOLS_DIR, find_executable
 from core.batch_entry import BatchAnalysisResult, BatchEntry, BatchSourceError
+from services.cookie_work_file import cleanup_cookie_work_copy_from_command
 from services.ytdlp_service import YtDlpService
 
 
@@ -129,15 +130,19 @@ class BatchAnalysisService:
         command.append(clean_url)
 
         creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            creationflags=creation_flags,
-        )
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=creation_flags,
+            )
+        except OSError:
+            cleanup_cookie_work_copy_from_command(command)
+            raise
 
         with self._process_lock:
             self._process = process
@@ -155,6 +160,7 @@ class BatchAnalysisService:
         finally:
             with self._process_lock:
                 self._process = None
+            cleanup_cookie_work_copy_from_command(command)
 
         if cancel_event.is_set():
             raise BatchAnalysisCancelledError("일괄 목록 확인 취소됨")
