@@ -44,6 +44,7 @@ class ComponentVersionCheck:
 class ComponentUpdateCheckResult:
     components: tuple[ComponentVersionCheck, ...]
     skipped: bool = False
+    installed_statuses: tuple[object, ...] = ()
 
     @property
     def updates(self) -> tuple[ComponentVersionCheck, ...]:
@@ -111,8 +112,13 @@ def _fetch_text(url: str, *, accept: str = "text/plain") -> str:
     )
 
 
-def _installed_versions() -> dict[str, str]:
-    return {status.key: status.version for status in inspect_tools()}
+def _installed_versions(statuses: tuple[object, ...] | None = None) -> dict[str, str]:
+    inspected = tuple(inspect_tools()) if statuses is None else statuses
+    return {
+        str(getattr(status, "key", "")): str(getattr(status, "version", ""))
+        for status in inspected
+        if str(getattr(status, "key", ""))
+    }
 
 
 def _local_signature(installed: dict[str, str]) -> str:
@@ -218,16 +224,26 @@ def _check_ffmpeg(current: str) -> ComponentVersionCheck:
 
 
 def check_component_updates(*, force: bool = False) -> ComponentUpdateCheckResult:
-    installed = _installed_versions()
+    # 로컬 실행 도구 검사는 비교적 무거우므로 한 번만 수행한다. 이 스냅샷은
+    # 최신 버전 비교뿐 아니라 설정 화면의 현재 버전/무결성 표시에도 재사용한다.
+    installed_statuses = tuple(inspect_tools())
+    installed = _installed_versions(installed_statuses)
     local_signature = _local_signature(installed)
 
     if not force and not update_check_due(local_signature):
-        return ComponentUpdateCheckResult(components=(), skipped=True)
+        return ComponentUpdateCheckResult(
+            components=(),
+            skipped=True,
+            installed_statuses=installed_statuses,
+        )
 
     try:
         ytdlp = _check_ytdlp(installed.get("ytdlp", "없음"))
         ffmpeg = _check_ffmpeg(installed.get("ffmpeg", "없음"))
-        return ComponentUpdateCheckResult(components=(ytdlp, ffmpeg))
+        return ComponentUpdateCheckResult(
+            components=(ytdlp, ffmpeg),
+            installed_statuses=installed_statuses,
+        )
     finally:
         # 인터넷이 끊겨 있어도 실행할 때마다 같은 서버를 반복해서 두드리지 않는다.
         # 단, 로컬 도구 버전이 바뀌면 24시간 안이어도 다음 실행에서 즉시 재확인한다.
