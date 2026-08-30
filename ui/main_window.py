@@ -1,4 +1,5 @@
 import subprocess
+from time import perf_counter
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QCloseEvent
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.general_preferences import load_general_preferences
+from app.performance_log import write_performance
 from app.settings_store import get_settings
 from services.browser_integration_service import (
     BROWSER_SEND_AUTO_DOWNLOAD,
@@ -35,6 +37,7 @@ from ui.sidebar import Sidebar
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
+        startup_started = perf_counter()
         super().__init__()
 
         self.settings = get_settings()
@@ -46,10 +49,34 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(MINIMUM_WIDTH, MINIMUM_HEIGHT)
 
         self.pages = QStackedWidget()
+
+        page_started = perf_counter()
         self.download_page = DownloadPage()
+        write_performance(
+            "startup.page.download",
+            (perf_counter() - page_started) * 1000.0,
+        )
+
+        page_started = perf_counter()
         self.media_tools_page = MediaToolsPage()
+        write_performance(
+            "startup.page.media_tools",
+            (perf_counter() - page_started) * 1000.0,
+        )
+
+        page_started = perf_counter()
         self.settings_page = UnifiedSettingsPage()
+        write_performance(
+            "startup.page.settings",
+            (perf_counter() - page_started) * 1000.0,
+        )
+
+        page_started = perf_counter()
         self.about_page = AboutPage()
+        write_performance(
+            "startup.page.about",
+            (perf_counter() - page_started) * 1000.0,
+        )
 
         # 1.2.0에서 프로그램 정보는 설정 탭이 아니라 사이드바의 독립 페이지로
         # 이동했다. 이전 정보 탭 버튼은 화면에서 숨겨 설정 탭을 6개로 유지한다.
@@ -78,6 +105,7 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self.settings_page)
         self.pages.addWidget(self.about_page)
 
+        shell_started = perf_counter()
         self.sidebar = Sidebar()
         self.sidebar.page_requested.connect(self.show_page)
 
@@ -90,10 +118,19 @@ class MainWindow(QMainWindow):
         root_layout.setSpacing(0)
         root_layout.addWidget(self.sidebar)
         root_layout.addWidget(self.pages, 1)
+        write_performance(
+            "startup.shell.sidebar_layout",
+            (perf_counter() - shell_started) * 1000.0,
+        )
 
+        tray_started = perf_counter()
         self._create_tray_icon()
         self._apply_tray_preferences()
         self.restore_window_state()
+        write_performance(
+            "startup.shell.tray_restore",
+            (perf_counter() - tray_started) * 1000.0,
+        )
 
         # 메인 UI 생성과 복원 작업을 먼저 끝낸 뒤 구성요소 버전을 확인한다.
         # 네트워크가 느리거나 끊겨도 RR-V 시작 자체는 지연되지 않는다.
@@ -109,6 +146,11 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(
             2600,
             lambda: self.about_page.start_auto_update_check(notify=True),
+        )
+
+        write_performance(
+            "startup.main_window.total",
+            (perf_counter() - startup_started) * 1000.0,
         )
 
     def _auto_app_update_available(self, result: object) -> None:
