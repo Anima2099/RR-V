@@ -1,3 +1,5 @@
+import subprocess
+
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
@@ -27,7 +29,7 @@ from ui.pages.about_page import AboutPage
 from ui.pages.download_page import DownloadPage
 from ui.pages.media_tools_page import MediaToolsPage
 from ui.pages.unified_settings_page import UnifiedSettingsPage
-from ui.dialogs.warm_dialogs import ask_warm_question
+from ui.dialogs.warm_dialogs import ask_warm_question, show_warm_message
 from ui.sidebar import Sidebar
 
 
@@ -37,6 +39,7 @@ class MainWindow(QMainWindow):
 
         self.settings = get_settings()
         self._force_exit = False
+        self._tray_update_notice_pending = False
 
         self.setWindowTitle(APP_NAME)
         self.resize(DEFAULT_WIDTH, DEFAULT_HEIGHT)
@@ -60,6 +63,15 @@ class MainWindow(QMainWindow):
         )
         self.settings_page.open_tools_requested.connect(
             self._open_tools_and_updates
+        )
+        self.about_page.auto_update_available.connect(
+            self._auto_app_update_available
+        )
+        self.about_page.install_update_requested.connect(
+            self._request_app_update_install
+        )
+        self.about_page.installer_ready.connect(
+            self._launch_app_update_installer
         )
         self.pages.addWidget(self.download_page)
         self.pages.addWidget(self.media_tools_page)
@@ -94,6 +106,88 @@ class MainWindow(QMainWindow):
                 notify=self.isVisible(),
             ),
         )
+        QTimer.singleShot(
+            2600,
+            lambda: self.about_page.start_auto_update_check(notify=True),
+        )
+
+    def _auto_app_update_available(self, result: object) -> None:
+        if not bool(getattr(result, "update_available", False)):
+            return
+
+        message = str(getattr(result, "message", "새 RR-V 버전을 사용할 수 있습니다."))
+        installer = getattr(result, "installer", None)
+        if self.isVisible():
+            if installer is not None:
+                detail = (
+                    message
+                    + "\n\nInstaller를 다운로드하고 SHA-256 검증을 통과하면 설치 프로그램을 실행합니다."
+                )
+                yes_text = "업데이트"
+            else:
+                detail = (
+                    message
+                    + "\n\n자동 설치용 검증 정보를 확인하지 못해 GitHub 릴리스 페이지를 엽니다."
+                )
+                yes_text = "릴리스 페이지"
+
+            if ask_warm_question(
+                self,
+                "RR-V 업데이트",
+                detail,
+                yes_text=yes_text,
+                no_text="나중에",
+            ):
+                self._request_app_update_install(result)
+            return
+
+        if self._tray_available():
+            self._tray_update_notice_pending = True
+            self.tray_icon.showMessage(
+                "RR-V 업데이트",
+                message,
+                QSystemTrayIcon.MessageIcon.Information,
+                9000,
+            )
+
+    def _request_app_update_install(self, result: object) -> None:
+        if getattr(result, "installer", None) is None:
+            self.about_page.open_current_release_page()
+            return
+
+        if self.download_page.has_active_download or self.media_tools_page.has_active_operation:
+            self.show_page(3)
+            self._activate_existing_window()
+            show_warm_message(
+                self,
+                "업데이트 준비",
+                "현재 다운로드 또는 미디어 작업이 진행 중입니다.\n\n"
+                "작업을 끝낸 뒤 다시 '업데이트 설치'를 눌러 주세요.",
+            )
+            return
+
+        self.show_page(3)
+        self._activate_existing_window()
+        self.about_page.begin_installer_download(result)
+
+    def _launch_app_update_installer(self, path: str) -> None:
+        installer_path = str(path or "").strip()
+        if not installer_path:
+            self.about_page.installer_launch_failed(
+                "검증된 Installer 경로를 확인하지 못했습니다."
+            )
+            return
+
+        try:
+            subprocess.Popen([installer_path], close_fds=True)
+        except OSError as error:
+            self.about_page.installer_launch_failed(
+                f"Installer를 실행하지 못했습니다.\n\n{error}"
+            )
+            return
+
+        self._force_exit = True
+        QTimer.singleShot(120, self.close)
 
     def _create_tray_icon(self) -> None:
         self.tray_icon = QSystemTrayIcon(self)
@@ -134,6 +228,7 @@ class MainWindow(QMainWindow):
         self.tray_menu.addAction(self.tray_exit_action)
         self.tray_icon.setContextMenu(self.tray_menu)
         self.tray_icon.activated.connect(self._tray_icon_activated)
+        self.tray_icon.messageClicked.connect(self._tray_message_clicked)
 
     def _tray_icon_activated(
         self,
@@ -141,6 +236,13 @@ class MainWindow(QMainWindow):
     ) -> None:
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self._activate_existing_window()
+
+    def _tray_message_clicked(self) -> None:
+        if not self._tray_update_notice_pending:
+            return
+        self._tray_update_notice_pending = False
+        self.show_page(3)
+        self._activate_existing_window()
 
     def _open_page_from_tray(self, page_index: int) -> None:
         self.show_page(page_index)
