@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 import threading
+import time
 
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
@@ -28,8 +29,13 @@ from app.app_update import (
     normalize_update_channel,
     update_channel_label,
 )
+from app.app_update_installer import (
+    InstallerDownloadResult,
+    download_verified_installer,
+)
 from app.constants import APP_RELEASE_CHANNEL, APP_VERSION
 from app.settings_store import get_settings
+from ui.dialogs.warm_dialogs import show_warm_message
 from ui.widgets.common import create_card
 
 
@@ -37,15 +43,25 @@ GITHUB_PROFILE_URL = "https://github.com/Anima2099"
 BUY_ME_A_COFFEE_URL = "https://buymeacoffee.com/anima2099"
 DEVELOPER_EMAIL = "anima2099@proton.me"
 _UPDATE_CHANNEL_SETTING_KEY = "updates/channel"
+_LAST_AUTO_UPDATE_CHECK_KEY = "updates/last_auto_check_epoch"
+_AUTO_UPDATE_CHECK_INTERVAL_SECONDS = 24 * 60 * 60
 
 
 class AboutPage(QWidget):
     update_check_finished = Signal(object)
+    auto_update_available = Signal(object)
+    install_update_requested = Signal(object)
+    installer_download_progress = Signal(int, int)
+    installer_download_finished = Signal(object)
+    installer_ready = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
         self._settings = get_settings()
         self._update_check_running = False
+        self._update_notify_on_result = False
+        self._installer_download_running = False
+        self._latest_update_result: AppUpdateResult | None = None
         self._release_url = RELEASES_PAGE_URL
         self._update_channel = normalize_update_channel(
             str(
@@ -89,6 +105,8 @@ class AboutPage(QWidget):
         layout.addWidget(scroll, 1)
 
         self.update_check_finished.connect(self._update_check_done)
+        self.installer_download_progress.connect(self._installer_download_progress)
+        self.installer_download_finished.connect(self._installer_download_done)
 
     @staticmethod
     def _distribution_root() -> Path:
@@ -174,7 +192,7 @@ class AboutPage(QWidget):
 
         description = QLabel(
             "선택한 업데이트 채널을 기준으로 GitHub Releases에서 RR-V의 새 버전을 확인합니다. "
-            "업데이트가 있으면 릴리스 페이지에서 새 설치 파일을 받을 수 있습니다."
+            "새 버전이 있으면 검증된 설치 파일을 내려받아 바로 업데이트할 수 있습니다."
         )
         description.setObjectName("bodyText")
         description.setWordWrap(True)
@@ -244,10 +262,10 @@ class AboutPage(QWidget):
         self.check_update_button.setObjectName("primaryButton")
         self.check_update_button.clicked.connect(self._start_update_check)
 
-        self.release_button = QPushButton("새 버전 받기")
+        self.release_button = QPushButton("업데이트 설치")
         self.release_button.setObjectName("secondaryButton")
         self.release_button.setEnabled(False)
-        self.release_button.clicked.connect(self._open_release_page)
+        self.release_button.clicked.connect(self._update_action_clicked)
 
         button_row = QHBoxLayout()
         button_row.setSpacing(8)
@@ -307,6 +325,8 @@ class AboutPage(QWidget):
         return card
 
     def _update_channel_changed(self) -> None:
+        if self._update_check_running or self._installer_download_running:
+            return
         selected = (
             UPDATE_CHANNEL_BETA
             if self.beta_channel_radio.isChecked()
@@ -319,7 +339,9 @@ class AboutPage(QWidget):
         self._settings.setValue(_UPDATE_CHANNEL_SETTING_KEY, selected)
         self._settings.sync()
         self._release_url = RELEASES_PAGE_URL
+        self._latest_update_result = None
         self.latest_version_label.setText("확인 전")
+        self.release_button.setText("업데이트 설치")
         self.release_button.setEnabled(False)
         self.update_status_label.setText(
             f"{update_channel_label(selected)} 채널로 변경했습니다. 업데이트 확인을 눌러 주세요."
@@ -330,26 +352,52 @@ class AboutPage(QWidget):
         self.beta_channel_radio.setEnabled(enabled)
 
     def _start_update_check(self) -> None:
+        self._begin_update_check(notify=False)
+
+    def start_auto_update_check(self, *, notify: bool = True) -> None:
+        if self._update_check_running or self._installer_download_running:
+            return
+
+        now = time.time()
+        try:
+            last_check = float(
+                self._settings.value(_LAST_AUTO_UPDATE_CHECK_KEY, 0) or 0
+            )
+        except (TypeError, ValueError):
+            last_check = 0.0
+        if now - last_check < _AUTO_UPDATE_CHECK_INTERVAL_SECONDS:
+            return
+
+        self._settings.setValue(_LAST_AUTO_UPDATE_CHECK_KEY, now)
+        self._settings.sync()
+        self._begin_update_check(notify=notify)
+
+    def _begin_update_check(self, *, notify: bool) -> None:
         if self._update_check_running:
             return
         self._update_check_running = True
+        self._update_notify_on_result = bool(notify)
         self.check_update_button.setEnabled(False)
         self.release_button.setEnabled(False)
         self._set_channel_controls_enabled(False)
         self.latest_version_label.setText("확인 중…")
-        channel_label = update_channel_label(self._update_channel)
+        selected_channel = self._update_channel
+        channel_label = update_channel_label(selected_channel)
         self.update_status_label.setText(
             f"GitHub Releases에서 {channel_label} 채널의 최신 버전을 확인하는 중…"
         )
 
         def run() -> None:
-            result = check_app_update(update_channel=self._update_channel)
+            result = check_app_update(update_channel=selected_channel)
             self.update_check_finished.emit(result)
 
         threading.Thread(target=run, daemon=True).start()
 
     def _update_check_done(self, result: AppUpdateResult) -> None:
+        notify = self._update_notify_on_result
+        self._update_notify_on_result = False
         self._update_check_running = False
+        self._latest_update_result = result
         self.check_update_button.setEnabled(True)
         self._set_channel_controls_enabled(True)
 
@@ -361,7 +409,110 @@ class AboutPage(QWidget):
         self.latest_version_label.setText(latest_text)
         self.update_status_label.setText(result.message)
         self._release_url = result.release_url or RELEASES_PAGE_URL
-        self.release_button.setEnabled(bool(result.update_available))
 
-    def _open_release_page(self) -> None:
+        if result.update_available and result.installer is not None:
+            self.release_button.setText("업데이트 설치")
+            self.release_button.setEnabled(True)
+        elif result.update_available:
+            self.release_button.setText("릴리스 페이지 열기")
+            self.release_button.setEnabled(True)
+            self.update_status_label.setText(
+                result.message
+                + " 자동 설치용 Installer의 SHA-256 검증 정보를 확인하지 못해 릴리스 페이지에서 직접 받아야 합니다."
+            )
+        else:
+            self.release_button.setText("업데이트 설치")
+            self.release_button.setEnabled(False)
+
+        if notify and result.update_available:
+            self.auto_update_available.emit(result)
+
+    def _update_action_clicked(self) -> None:
+        result = self._latest_update_result
+        if result is None or not result.update_available:
+            return
+        if result.installer is None:
+            self.open_current_release_page()
+            return
+        self.install_update_requested.emit(result)
+
+    def begin_installer_download(self, result: AppUpdateResult) -> None:
+        if self._installer_download_running:
+            return
+        if not result.update_available or result.installer is None:
+            self.open_current_release_page()
+            return
+
+        self._installer_download_running = True
+        self.check_update_button.setEnabled(False)
+        self.release_button.setEnabled(False)
+        self._set_channel_controls_enabled(False)
+        self.update_status_label.setText(
+            f"RR-V {result.latest_version} Installer를 다운로드하는 중…"
+        )
+        asset = result.installer
+
+        def run() -> None:
+            download_result = download_verified_installer(
+                asset,
+                progress=lambda downloaded, total: self.installer_download_progress.emit(
+                    downloaded,
+                    total,
+                ),
+            )
+            self.installer_download_finished.emit(download_result)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _installer_download_progress(self, downloaded: int, total: int) -> None:
+        if not self._installer_download_running:
+            return
+        downloaded_mb = max(0, downloaded) / (1024 * 1024)
+        if total > 0:
+            percent = max(0, min(100, int(downloaded * 100 / total)))
+            total_mb = total / (1024 * 1024)
+            self.update_status_label.setText(
+                f"Installer 다운로드 중… {percent}% · {downloaded_mb:.1f} / {total_mb:.1f} MB"
+            )
+        else:
+            self.update_status_label.setText(
+                f"Installer 다운로드 중… {downloaded_mb:.1f} MB"
+            )
+
+    def _installer_download_done(self, result: InstallerDownloadResult) -> None:
+        self._installer_download_running = False
+        if not result.ok or result.path is None:
+            self.check_update_button.setEnabled(True)
+            self._set_channel_controls_enabled(True)
+            self.release_button.setEnabled(
+                bool(self._latest_update_result and self._latest_update_result.update_available)
+            )
+            self.update_status_label.setText("⚠ 업데이트 Installer를 준비하지 못했습니다.")
+            show_warm_message(
+                self.window(),
+                "업데이트 다운로드 실패",
+                result.message,
+            )
+            return
+
+        self.update_status_label.setText(
+            "✓ Installer 다운로드와 SHA-256 검증이 완료되었습니다. 설치 프로그램을 실행합니다."
+        )
+        self.installer_ready.emit(str(result.path))
+
+    def installer_launch_failed(self, message: str) -> None:
+        self._installer_download_running = False
+        self.check_update_button.setEnabled(True)
+        self._set_channel_controls_enabled(True)
+        self.release_button.setEnabled(
+            bool(self._latest_update_result and self._latest_update_result.update_available)
+        )
+        self.update_status_label.setText("⚠ Installer를 실행하지 못했습니다.")
+        show_warm_message(
+            self.window(),
+            "업데이트 실행 실패",
+            message,
+        )
+
+    def open_current_release_page(self) -> None:
         QDesktopServices.openUrl(QUrl(self._release_url or RELEASES_PAGE_URL))
