@@ -18,6 +18,7 @@ from PySide6.QtCore import QTimer
 
 from app.application import create_application
 from app.general_preferences import load_general_preferences
+from services.cookie_work_file import cleanup_stale_cookie_work_directories
 from services.external_url_service import ExternalUrlService, extract_external_urls
 from services.windows_startup_service import (
     WindowsStartupError,
@@ -75,6 +76,11 @@ def main() -> int:
                 "잠시 후 다시 실행해 주세요.",
             )
             return 1
+
+    # 두 번째 실행 프로세스가 아니라 실제 primary RR-V가 된 뒤에만 이전
+    # 비정상 종료에서 남은 임시 인증 파일을 정리한다. 실행 중인 primary의
+    # 작업 쿠키를 다른 짧은 브리지/재실행 프로세스가 지우는 일을 막는다.
+    cleanup_stale_cookie_work_directories()
 
     general_preferences = load_general_preferences()
     try:
