@@ -50,7 +50,7 @@ class SourceSyntaxTests(unittest.TestCase):
         }
         self.assertIn("_create_tool_diagnostics_card", called_methods)
 
-    def test_unified_settings_suppresses_duplicate_startup_tool_refresh(self) -> None:
+    def test_unified_settings_defers_startup_tool_refresh(self) -> None:
         path = ROOT / "ui" / "pages" / "unified_settings_page.py"
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         unified_class = next(
@@ -76,8 +76,8 @@ class SourceSyntaxTests(unittest.TestCase):
             for node in ast.walk(init_method)
             if isinstance(node, ast.Attribute)
         }
-        self.assertIn("_startup_tool_refresh_seen", init_attributes)
         self.assertIn("_initializing_settings_page", init_attributes)
+        self.assertNotIn("_startup_tool_refresh_seen", init_attributes)
         self.assertTrue(any(isinstance(node, ast.Return) for node in ast.walk(refresh_method)))
         self.assertTrue(
             any(
@@ -87,6 +87,33 @@ class SourceSyntaxTests(unittest.TestCase):
                 for node in ast.walk(refresh_method)
             )
         )
+
+    def test_unified_settings_reuses_background_tool_snapshot(self) -> None:
+        path = ROOT / "ui" / "pages" / "unified_settings_page.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        unified_class = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "UnifiedSettingsPage"
+        )
+        done_method = next(
+            node
+            for node in unified_class.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "_component_check_done"
+        )
+        called_methods = {
+            node.func.attr
+            for node in ast.walk(done_method)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        }
+        attributes = {
+            node.attr
+            for node in ast.walk(done_method)
+            if isinstance(node, ast.Attribute)
+        }
+        self.assertIn("_apply_inspected_tool_statuses", called_methods)
+        self.assertIn("installed_statuses", attributes)
 
 
 if __name__ == "__main__":
