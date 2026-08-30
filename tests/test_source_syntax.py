@@ -29,6 +29,27 @@ class SourceSyntaxTests(unittest.TestCase):
                 source = path.read_text(encoding="utf-8")
                 ast.parse(source, filename=str(path))
 
+    def test_community_tools_tab_includes_tool_diagnostics_card(self) -> None:
+        path = ROOT / "ui" / "pages" / "community_settings_page.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        community_class = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "CommunitySettingsPage"
+        )
+        tools_tab = next(
+            node
+            for node in community_class.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "_create_tools_tab"
+        )
+        called_methods = {
+            node.func.attr
+            for node in ast.walk(tools_tab)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        }
+        self.assertIn("_create_tool_diagnostics_card", called_methods)
+
 
 if __name__ == "__main__":
     unittest.main()
