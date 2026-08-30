@@ -16,8 +16,13 @@ import zipfile
 
 from app.constants import APP_VERSION
 from app.http_client import download_https_file, fetch_https_bytes
-from app.paths import RRV_TOOLS_DIR, find_executable
-from app.tool_manager import update_deno, update_ffmpeg_release, update_ytdlp
+from app.paths import (
+    RRV_TOOLS_DIR,
+    WPC_PROVIDER_VERSION,
+    find_executable,
+    restore_bundled_wpc_provider,
+)
+from app.tool_manager import inspect_tools, update_deno, update_ffmpeg_release, update_ytdlp
 from app.tool_sources import DENO_LATEST_API, YTDLP_LATEST_API
 
 
@@ -271,12 +276,40 @@ def ensure_deno(progress: ProgressCallback | None = None) -> tuple[bool, str]:
         return False, f"Deno 설치에 실패했습니다: {error}"
 
 
+def _wpc_status():  # type: ignore[no-untyped-def]
+    return next((status for status in inspect_tools() if status.key == "pot"), None)
+
+
+def ensure_wpc_runtime(progress: ProgressCallback | None = None) -> tuple[bool, str]:
+    """WPC / nodriver 런타임의 관리 파일 무결성을 확인하고 필요할 때만 복구한다."""
+
+    current = _wpc_status()
+    if current is not None and current.available:
+        return True, f"YouTube 인증 런타임 {current.version} · 무결성 정상"
+
+    if progress is not None:
+        progress("YouTube 인증 런타임 무결성 복구 중…")
+
+    if not restore_bundled_wpc_provider():
+        return False, "YouTube 인증 런타임 검증본을 복구하지 못했습니다."
+
+    refreshed = _wpc_status()
+    if refreshed is None or not refreshed.available:
+        return False, "YouTube 인증 런타임 복구 후 SHA-256 검증에 실패했습니다."
+
+    return True, (
+        f"YouTube 인증 런타임 {refreshed.version} · "
+        f"WPC {WPC_PROVIDER_VERSION} 검증본 복구 및 SHA-256 확인 완료"
+    )
+
+
 def ensure_runtime_tools(progress: ProgressCallback | None = None) -> tuple[bool, str]:
-    """필수 외부 도구를 공식 배포처 기준으로 설치하거나 최신 상태로 맞춘다."""
+    """필수 외부 도구와 인증 런타임을 설치·업데이트하고 무결성을 확인한다."""
     actions = (
         ("yt-dlp", ensure_ytdlp),
         ("FFmpeg / FFprobe", update_ffmpeg_release),
         ("Deno", ensure_deno),
+        ("YouTube 인증 런타임", ensure_wpc_runtime),
     )
 
     messages: list[str] = []
