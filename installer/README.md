@@ -1,6 +1,6 @@
 # RR-V Installer
 
-RR-V 1.2.0 Community Beta uses Inno Setup 7 to build a per-user Windows Installer.
+RR-V 1.3.0 Community Beta uses Inno Setup 7 to build a per-user Windows Installer.
 
 ## Install model
 
@@ -52,15 +52,15 @@ powershell -ExecutionPolicy Bypass -File .\BUILD_INSTALLER.ps1
 
 Expected output:
 
-`installer-output\RR-V_Setup_1.2.0.exe`
+`installer-output\RR-V_Setup_1.3.0.exe`
 
-`BUILD_INSTALLER.ps1` finds Inno Setup 7 automatically, verifies the required RR-V/license files, confirms external runtime tools and Qt Virtual Keyboard were not bundled, compiles the Installer, and prints the final SHA-256 hash.
+`BUILD_INSTALLER.ps1` reads `APP_VERSION` from `app\constants.py`, verifies that the Inno Setup version matches it, checks the required RR-V/license files, confirms external runtime tools and Qt Virtual Keyboard were not bundled, compiles the Installer, and prints the final SHA-256 hash.
 
 ## Installer smoke test
 
 1. Confirm the destination page visibly shows `%LOCALAPPDATA%\Programs\RR-V` by default.
 2. Install without administrator elevation.
-3. Confirm RR-V appears in Windows Installed apps as version 1.2.0.
+3. Confirm RR-V appears in Windows Installed apps as version 1.3.0.
 4. Confirm Start Menu shortcut works.
 5. If selected, confirm the desktop shortcut works.
 6. Launch RR-V and verify Program Information/license links.
