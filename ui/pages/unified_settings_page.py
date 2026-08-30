@@ -17,6 +17,22 @@ from ui.pages.community_settings_page import CommunitySettingsPage
 class UnifiedSettingsPage(CommunitySettingsPage):
     """일반 탭의 저장 동작을 하나의 고정 버튼으로 정리한다."""
 
+    def __init__(self) -> None:
+        # SettingsPage와 ThemeSettingsPage가 초기화 과정에서 같은 도구 상태
+        # 갱신을 각각 한 번씩 요청한다. 최종 Community UI에서는 첫 요청만
+        # 실제 검사하고 두 번째 중복 요청은 건너뛰어 시작 지연을 줄인다.
+        self._startup_tool_refresh_seen = False
+        self._initializing_settings_page = True
+        super().__init__()
+        self._initializing_settings_page = False
+
+    def _refresh_tool_status(self) -> None:
+        if getattr(self, "_initializing_settings_page", False):
+            if self._startup_tool_refresh_seen:
+                return
+            self._startup_tool_refresh_seen = True
+        super()._refresh_tool_status()
+
     def _create_general_tab(self):  # type: ignore[no-untyped-def]
         page = QWidget()
         page_layout = QVBoxLayout(page)
