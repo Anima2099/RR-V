@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import json
 import re
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 
 from app.constants import APP_RELEASE_CHANNEL, APP_VERSION
 from app.http_client import fetch_https_bytes
@@ -16,6 +17,16 @@ UPDATE_CHANNEL_STABLE = "stable"
 UPDATE_CHANNEL_BETA = "beta"
 _VALID_UPDATE_CHANNELS = {UPDATE_CHANNEL_STABLE, UPDATE_CHANNEL_BETA}
 _PRERELEASE_TAG_MARKERS = ("beta", "alpha", "preview", "pre", "rc")
+_INSTALLER_NAME_PREFIX = "rr-v_setup_"
+_INSTALLER_MAX_SIZE = 300 * 1024 * 1024
+
+
+@dataclass(slots=True, frozen=True)
+class AppInstallerAsset:
+    name: str
+    url: str
+    sha256: str
+    size: int = 0
 
 
 @dataclass(slots=True, frozen=True)
@@ -27,6 +38,7 @@ class AppUpdateResult:
     message: str
     update_channel: str = UPDATE_CHANNEL_STABLE
     latest_release_channel: str = ""
+    installer: AppInstallerAsset | None = None
 
 
 def normalize_update_channel(value: str, default: str = UPDATE_CHANNEL_STABLE) -> str:
@@ -107,6 +119,74 @@ def _select_latest_release(
     return latest, release_channel
 
 
+def _parse_sha256_digest(value: object) -> str:
+    text = str(value or "").strip().casefold()
+    match = re.fullmatch(r"sha256:([0-9a-f]{64})", text)
+    return match.group(1) if match else ""
+
+
+def _trusted_installer_url(value: object) -> str:
+    url = str(value or "").strip()
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return ""
+    if parsed.scheme.casefold() != "https" or parsed.netloc.casefold() != "github.com":
+        return ""
+    expected_prefix = "/Anima2099/RR-V/releases/download/"
+    if not parsed.path.startswith(expected_prefix):
+        return ""
+    return url
+
+
+def _installer_asset_from_release(item: dict[str, object]) -> AppInstallerAsset | None:
+    assets = item.get("assets")
+    if not isinstance(assets, list):
+        return None
+
+    expected_version = _display_version(str(item.get("tag_name") or ""))
+    expected_name = f"RR-V_Setup_{expected_version}.exe".casefold()
+    candidates: list[tuple[int, AppInstallerAsset]] = []
+
+    for raw_asset in assets:
+        if not isinstance(raw_asset, dict):
+            continue
+
+        name = str(raw_asset.get("name") or "").strip()
+        normalized_name = name.casefold()
+        if (
+            not normalized_name.startswith(_INSTALLER_NAME_PREFIX)
+            or not normalized_name.endswith(".exe")
+            or "/" in name
+            or "\\" in name
+        ):
+            continue
+
+        sha256 = _parse_sha256_digest(raw_asset.get("digest"))
+        url = _trusted_installer_url(raw_asset.get("browser_download_url"))
+        if not sha256 or not url:
+            continue
+
+        try:
+            size = int(raw_asset.get("size") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        if size < 0 or size > _INSTALLER_MAX_SIZE:
+            continue
+
+        asset = AppInstallerAsset(
+            name=name,
+            url=url,
+            sha256=sha256,
+            size=size,
+        )
+        candidates.append((1 if normalized_name == expected_name else 0, asset))
+
+    if not candidates:
+        return None
+    return max(candidates, key=lambda candidate: candidate[0])[1]
+
+
 def _result(
     *,
     latest_version: str,
@@ -115,6 +195,7 @@ def _result(
     message: str,
     update_channel: str,
     latest_release_channel: str = "",
+    installer: AppInstallerAsset | None = None,
 ) -> AppUpdateResult:
     return AppUpdateResult(
         current_version=APP_VERSION,
@@ -124,6 +205,7 @@ def _result(
         message=message,
         update_channel=update_channel,
         latest_release_channel=latest_release_channel,
+        installer=installer,
     )
 
 
@@ -217,6 +299,7 @@ def check_app_update(
     else:
         message = f"현재 버전이 {selected_label} 채널의 최신 버전보다 새 버전입니다."
 
+    installer = _installer_asset_from_release(latest) if update_available else None
     return _result(
         latest_version=latest_version,
         update_available=update_available,
@@ -224,4 +307,5 @@ def check_app_update(
         message=message,
         update_channel=selected_channel,
         latest_release_channel=latest_release_channel,
+        installer=installer,
     )
