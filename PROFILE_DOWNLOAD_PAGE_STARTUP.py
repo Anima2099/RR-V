@@ -45,6 +45,19 @@ def main() -> int:
 
         return wrapped
 
+    def wrap_current_phase_function(
+        label: str,
+        function: Callable[..., Any],
+    ) -> Callable[..., Any]:
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
+            started = perf_counter()
+            try:
+                return function(*args, **kwargs)
+            finally:
+                record(f"{phase['name']}.{label}", _elapsed_ms(started))
+
+        return wrapped
+
     def wrap_phase_function(
         name: str,
         phase_name: str,
@@ -134,7 +147,9 @@ def main() -> int:
     module.QToolButton = timed_class("qtoolbutton", originals["QToolButton"])
     module.QScrollArea = timed_class("qscrollarea", originals["QScrollArea"])
     module.QButtonGroup = timed_class("qbuttongroup", originals["QButtonGroup"])
-    module.create_card = wrap_function("upper.create_card", originals["create_card"])
+    module.create_card = wrap_current_phase_function(
+        "create_card", originals["create_card"]
+    )
 
     module.DownloadPage._create_list_page = wrap_phase_function(
         "list.page_total", "list", originals["_create_list_page"]
