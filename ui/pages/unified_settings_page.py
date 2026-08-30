@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.component_updates import normalize_ffmpeg_release_version
 from app.theme import active_theme_mode, load_theme_preference
 from ui.pages.community_settings_page import CommunitySettingsPage
 
@@ -18,20 +19,121 @@ class UnifiedSettingsPage(CommunitySettingsPage):
     """일반 탭의 저장 동작을 하나의 고정 버튼으로 정리한다."""
 
     def __init__(self) -> None:
-        # SettingsPage와 ThemeSettingsPage가 초기화 과정에서 같은 도구 상태
-        # 갱신을 각각 한 번씩 요청한다. 최종 Community UI에서는 첫 요청만
-        # 실제 검사하고 두 번째 중복 요청은 건너뛰어 시작 지연을 줄인다.
-        self._startup_tool_refresh_seen = False
+        # SettingsPage와 ThemeSettingsPage는 초기화 과정에서 도구 상태 갱신을
+        # 요청하지만, 외부 EXE 실행과 WPC 무결성 검사는 창이 보인 뒤 시작되는
+        # 백그라운드 구성요소 확인 결과를 재사용한다.
         self._initializing_settings_page = True
         super().__init__()
         self._initializing_settings_page = False
 
     def _refresh_tool_status(self) -> None:
         if getattr(self, "_initializing_settings_page", False):
-            if self._startup_tool_refresh_seen:
-                return
-            self._startup_tool_refresh_seen = True
+            return
         super()._refresh_tool_status()
+
+    def _apply_inspected_tool_statuses(self, raw_statuses: object) -> None:
+        if not hasattr(self, "tool_status_labels"):
+            return
+
+        try:
+            statuses = {
+                str(getattr(status, "key", "")): status
+                for status in tuple(raw_statuses or ())
+                if str(getattr(status, "key", ""))
+            }
+        except TypeError:
+            return
+        if not statuses:
+            return
+
+        missing: set[str] = set()
+        repair: set[str] = set()
+
+        def apply_single(key: str, status: object | None) -> None:
+            if status is None:
+                self.tool_version_labels[key].setText("확인 불가")
+                self._set_tool_visual(key, "error", "? 확인 실패")
+                repair.add(key)
+                return
+
+            version = str(getattr(status, "version", "") or "확인 불가")
+            self.tool_version_labels[key].setText(version)
+            issue_kind = self._status_issue_kind(status)
+            if issue_kind == "normal":
+                self._set_tool_visual(key, "normal", "✓ 정상")
+            elif issue_kind == "missing":
+                self._set_tool_visual(key, "error", "✕ 설치 필요")
+                missing.add(key)
+            else:
+                self._set_tool_visual(key, "error", "⚠ 복구 필요")
+                repair.add(key)
+
+        apply_single("ytdlp", statuses.get("ytdlp"))
+
+        ffmpeg = statuses.get("ffmpeg")
+        ffprobe = statuses.get("ffprobe")
+        ffmpeg_available = bool(
+            ffmpeg
+            and getattr(ffmpeg, "available", False)
+            and ffprobe
+            and getattr(ffprobe, "available", False)
+        )
+        if ffmpeg_available and ffmpeg is not None and ffprobe is not None:
+            ffmpeg_version = normalize_ffmpeg_release_version(
+                str(getattr(ffmpeg, "version", ""))
+            )
+            ffprobe_version = normalize_ffmpeg_release_version(
+                str(getattr(ffprobe, "version", ""))
+            )
+            if ffmpeg_version == ffprobe_version:
+                version_text = ffmpeg_version
+            else:
+                version_text = f"ffmpeg {ffmpeg_version} / ffprobe {ffprobe_version}"
+            self.tool_version_labels["ffmpeg"].setText(version_text)
+            self._set_tool_visual("ffmpeg", "normal", "✓ 정상")
+        else:
+            ffmpeg_kind = self._status_issue_kind(ffmpeg)
+            ffprobe_kind = self._status_issue_kind(ffprobe)
+            both_missing = ffmpeg_kind == "missing" and ffprobe_kind == "missing"
+            if both_missing:
+                self.tool_version_labels["ffmpeg"].setText("없음")
+                self._set_tool_visual("ffmpeg", "error", "✕ 설치 필요")
+                missing.add("ffmpeg")
+            else:
+                ffmpeg_text = str(
+                    getattr(ffmpeg, "version", "확인 불가") or "확인 불가"
+                )
+                ffprobe_text = str(
+                    getattr(ffprobe, "version", "확인 불가") or "확인 불가"
+                )
+                self.tool_version_labels["ffmpeg"].setText(
+                    f"ffmpeg {ffmpeg_text} / ffprobe {ffprobe_text}"
+                )
+                self._set_tool_visual("ffmpeg", "error", "⚠ 복구 필요")
+                repair.add("ffmpeg")
+
+        apply_single("deno", statuses.get("deno"))
+        apply_single("pot", statuses.get("pot"))
+
+        self._missing_runtime_keys = missing
+        self._repair_runtime_keys = repair
+        if missing and repair:
+            self.latest_update_button.setText("설치 및 복구")
+        elif missing:
+            self.latest_update_button.setText("필수 구성요소 설치")
+        elif repair:
+            self.latest_update_button.setText("구성요소 복구")
+        else:
+            self.latest_update_button.setText("최신 상태로 맞추기")
+        self.latest_update_button.setEnabled(True)
+
+    def _component_check_done(self, result: object, notify: bool) -> None:
+        # check_component_updates()가 백그라운드에서 이미 수행한 로컬 도구
+        # 검사를 그대로 재사용한다. 여기서 inspect_tools()를 다시 호출하지 않는다.
+        self._apply_inspected_tool_statuses(
+            getattr(result, "installed_statuses", ())
+        )
+        super()._component_check_done(result, notify)
 
     def _create_general_tab(self):  # type: ignore[no-untyped-def]
         page = QWidget()
