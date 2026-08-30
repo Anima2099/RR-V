@@ -1,5 +1,5 @@
 #define MyAppName "RR-V"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "Anima2099"
 #define MyAppURL "https://github.com/Anima2099/RR-V"
 #define MyAppExeName "RR-V.exe"
@@ -26,10 +26,10 @@ UsePreviousTasks=yes
 PrivilegesRequired=lowest
 SetupArchitecture=x64
 OutputDir=..\installer-output
-OutputBaseFilename=RR-V_Setup_1.2.0
+OutputBaseFilename=RR-V_Setup_{#MyAppVersion}
 SetupIconFile=..\resources\icons\RR-V.ico
 UninstallDisplayIcon={app}\RR-V.exe
-UninstallDisplayName=RR-V 1.2.0
+UninstallDisplayName=RR-V {#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -37,11 +37,11 @@ CloseApplications=yes
 CloseApplicationsFilter=RR-V.exe,RR-V-Auth-Helper.exe
 RestartApplications=no
 SetupLogging=yes
-VersionInfoVersion=1.2.0.0
+VersionInfoVersion={#MyAppVersion}.0
 VersionInfoCompany=Anima2099
 VersionInfoDescription=RR-V Installer
 VersionInfoProductName=RR-V
-VersionInfoProductVersion=1.2.0
+VersionInfoProductVersion={#MyAppVersion}
 
 ; Inno Setup의 외부 언어 파일 설치 여부에 의존하지 않고, RR-V가 실제로
 ; 사용하는 기본 설치/제거 UI 메시지를 이 스크립트 안에서 한국어로 통일한다.
@@ -149,7 +149,6 @@ UninstallStatusLabel=RR-V를 제거하는 동안 잠시 기다려 주세요.
 UninstalledAll=%1 제거가 완료되었습니다.
 UninstalledMost=%1 제거가 완료되었습니다.%n%n일부 항목은 제거하지 못했습니다. 해당 항목은 직접 삭제할 수 있습니다.
 UninstalledAndNeedsRestart=%1 제거를 완료하려면 컴퓨터를 다시 시작해야 합니다.%n%n지금 다시 시작하시겠습니까?
-UninstallDataCorrupted="%1" 파일이 손상되어 제거할 수 없습니다.
 WizardUninstalling=제거 중
 StatusUninstalling=%1 제거 중...
 
