@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -16,8 +17,10 @@ import zipfile
 
 from app.constants import APP_VERSION
 from app.paths import (
+    BUNDLED_WPC_RUNTIME_DIR,
     WPC_PROVIDER_VERSION,
     RRV_WPC_PROVIDER_DIR,
+    RRV_WPC_RUNTIME_DIR,
     RRV_TOOLS_DIR,
     find_executable,
     has_bundled_tools,
@@ -28,6 +31,7 @@ from app.tool_sources import (
     FFMPEG_RELEASE_SHA256_URL,
     FFMPEG_RELEASE_VERSION_URL,
     FFMPEG_RELEASE_ZIP_URL,
+    YTDLP_LATEST_API,
 )
 
 
@@ -55,6 +59,7 @@ _FFMPEG_RELEASE_VERSION_RE = re.compile(
     r"(?<![\d.-])(\d+\.\d+(?:\.\d+)?)(?=[-+\s]|$)",
     re.IGNORECASE,
 )
+_UNUSABLE_VERSION_RESULTS = {"실행 오류", "버전 확인 불가"}
 
 
 def _strip_ansi(text: str) -> str:
@@ -79,6 +84,9 @@ def _version_for(path: Path, args: tuple[str, ...]) -> str:
     except (OSError, subprocess.SubprocessError):
         return "실행 오류"
 
+    if result.returncode != 0:
+        return "실행 오류"
+
     output = _strip_ansi(result.stdout or result.stderr or "").strip()
     if not output:
         return "버전 확인 불가"
@@ -91,6 +99,112 @@ def _version_for(path: Path, args: tuple[str, ...]) -> str:
             remainder = first[index + len(marker):].strip()
             return remainder.split()[0] if remainder else first[:60]
     return first[:80]
+
+
+def _usable_version(version: str) -> bool:
+    return bool(version.strip()) and version not in _UNUSABLE_VERSION_RESULTS
+
+
+def _sha256_for(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while True:
+            chunk = stream.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _managed_tree_matches(source_root: Path, installed_root: Path) -> bool:
+    """번들에 포함된 관리 파일이 설치 런타임에 바이트 단위로 동일한지 확인한다.
+
+    설치 런타임에 생긴 추가 파일은 무시하되, 번들에 있던 파일이 없거나 내용이
+    달라진 경우에는 손상으로 본다. __pycache__와 .pyc는 재생성 가능한 캐시라
+    비교 대상에서 제외한다.
+    """
+
+    if not source_root.is_dir() or not installed_root.is_dir():
+        return False
+
+    try:
+        source_files = tuple(
+            path
+            for path in source_root.rglob("*")
+            if path.is_file()
+            and "__pycache__" not in path.parts
+            and path.suffix.lower() != ".pyc"
+        )
+    except OSError:
+        return False
+
+    if not source_files:
+        return False
+
+    for source in source_files:
+        try:
+            relative = source.relative_to(source_root)
+            installed = installed_root / relative
+            if not installed.is_file():
+                return False
+            if source.stat().st_size != installed.stat().st_size:
+                return False
+            if _sha256_for(source) != _sha256_for(installed):
+                return False
+        except (OSError, ValueError):
+            return False
+    return True
+
+
+def _wpc_integrity_ready() -> bool:
+    if not wpc_provider_runtime_ready():
+        return False
+    # 개발 환경에서 번들 기준 파일이 없는 경우에는 기존의 빠른 런타임 확인을
+    # 유지한다. 최종 패키지에서는 번들 런타임과 SHA-256까지 비교한다.
+    if not BUNDLED_WPC_RUNTIME_DIR.is_dir():
+        return True
+    return _managed_tree_matches(BUNDLED_WPC_RUNTIME_DIR, RRV_WPC_RUNTIME_DIR)
+
+
+def _ffmpeg_pair_consistent(statuses: list[ToolStatus]) -> list[ToolStatus]:
+    by_key = {status.key: status for status in statuses}
+    ffmpeg = by_key.get("ffmpeg")
+    ffprobe = by_key.get("ffprobe")
+    if ffmpeg is None or ffprobe is None or not ffmpeg.available or not ffprobe.available:
+        return statuses
+
+    ffmpeg_version = _ffmpeg_release_version(ffmpeg.version)
+    ffprobe_version = _ffmpeg_release_version(ffprobe.version)
+    if ffmpeg_version == ffprobe_version:
+        return statuses
+
+    replaced: list[ToolStatus] = []
+    for status in statuses:
+        if status.key == "ffmpeg":
+            replaced.append(
+                ToolStatus(
+                    key=status.key,
+                    label=status.label,
+                    filename=status.filename,
+                    available=False,
+                    version=f"{status.version} · FFprobe와 버전 불일치",
+                    path=status.path,
+                )
+            )
+        elif status.key == "ffprobe":
+            replaced.append(
+                ToolStatus(
+                    key=status.key,
+                    label=status.label,
+                    filename=status.filename,
+                    available=False,
+                    version=f"{status.version} · FFmpeg와 버전 불일치",
+                    path=status.path,
+                )
+            )
+        else:
+            replaced.append(status)
+    return replaced
 
 
 def inspect_tools() -> tuple[ToolStatus, ...]:
@@ -109,28 +223,114 @@ def inspect_tools() -> tuple[ToolStatus, ...]:
                 )
             )
             continue
+
+        version = _version_for(path, args)
         statuses.append(
             ToolStatus(
                 key=key,
                 label=label,
                 filename=filename,
-                available=True,
-                version=_version_for(path, args),
+                available=_usable_version(version),
+                version=version,
                 path=str(path),
             )
         )
-    wpc_ready = wpc_provider_runtime_ready()
+
+    statuses = _ffmpeg_pair_consistent(statuses)
+    wpc_runtime_present = wpc_provider_runtime_ready()
+    wpc_integrity_ok = _wpc_integrity_ready()
     statuses.append(
         ToolStatus(
             key="pot",
             label="YouTube 인증 런타임",
             filename="WPC / nodriver",
-            available=wpc_ready,
-            version=f"WPC {WPC_PROVIDER_VERSION} + nodriver" if wpc_ready else "없음",
+            available=wpc_integrity_ok,
+            version=(
+                f"WPC {WPC_PROVIDER_VERSION} + nodriver"
+                if wpc_integrity_ok
+                else ("손상 또는 불완전" if wpc_runtime_present else "없음")
+            ),
             path=str(RRV_WPC_PROVIDER_DIR),
         )
     )
     return tuple(statuses)
+
+
+def _fetch_small_text(url: str, *, accept: str = "text/plain") -> str:
+    request = Request(
+        url,
+        headers={
+            "User-Agent": f"RR-V/{APP_VERSION}",
+            "Accept": accept,
+            "Cache-Control": "no-cache",
+        },
+    )
+    with urlopen(request, timeout=12) as response:
+        data = response.read(256 * 1024)
+    return data.decode("utf-8", errors="replace").strip()
+
+
+def _extract_named_sha256(text: str, filename: str) -> str | None:
+    target = filename.casefold()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        candidate_name = parts[-1].lstrip("*./").casefold()
+        match = _SHA256_RE.fullmatch(parts[0])
+        if candidate_name == target and match is not None:
+            return match.group(1).lower()
+    return None
+
+
+def _latest_ytdlp_nightly_identity() -> tuple[str, str]:
+    payload = json.loads(
+        _fetch_small_text(
+            YTDLP_LATEST_API,
+            accept="application/vnd.github+json",
+        )
+    )
+    tag = str(payload.get("tag_name") or "").strip()
+    if not tag:
+        raise ValueError("yt-dlp Nightly 최신 릴리스 태그를 찾지 못했습니다.")
+
+    assets = payload.get("assets")
+    if not isinstance(assets, list):
+        raise ValueError("yt-dlp Nightly 릴리스 파일 목록을 확인하지 못했습니다.")
+
+    exe_asset: dict[str, object] | None = None
+    checksum_asset: dict[str, object] | None = None
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        name = str(asset.get("name") or "")
+        if name == "yt-dlp.exe":
+            exe_asset = asset
+        elif name == "SHA2-256SUMS":
+            checksum_asset = asset
+
+    if exe_asset is None:
+        raise ValueError("yt-dlp Nightly 릴리스에서 yt-dlp.exe를 찾지 못했습니다.")
+
+    digest_text = str(exe_asset.get("digest") or "").strip()
+    if digest_text.lower().startswith("sha256:"):
+        digest = digest_text.split(":", 1)[1].strip().lower()
+        if _SHA256_RE.fullmatch(digest):
+            return tag, digest
+
+    if checksum_asset is None:
+        raise ValueError("yt-dlp Nightly SHA-256 파일을 찾지 못했습니다.")
+    checksum_url = str(checksum_asset.get("browser_download_url") or "").strip()
+    if not checksum_url.startswith("https://"):
+        raise ValueError("yt-dlp Nightly SHA-256 다운로드 주소가 올바르지 않습니다.")
+    checksum_text = _fetch_small_text(checksum_url)
+    digest = _extract_named_sha256(checksum_text, "yt-dlp.exe")
+    if digest is None:
+        raise ValueError("yt-dlp.exe의 SHA-256 값을 확인하지 못했습니다.")
+    return tag, digest
 
 
 def update_ytdlp(progress: Callable[[str], None] | None = None) -> tuple[bool, str]:
@@ -139,11 +339,26 @@ def update_ytdlp(progress: Callable[[str], None] | None = None) -> tuple[bool, s
         return False, "yt-dlp.exe가 없어서 업데이트할 수 없습니다. 도구 복구를 먼저 실행해 주세요."
 
     if progress is not None:
-        progress("yt-dlp Nightly 업데이트 확인 중…")
+        progress("yt-dlp Nightly 공식 SHA-256 확인 중…")
+
+    try:
+        target_tag, expected_sha256 = _latest_ytdlp_nightly_identity()
+        current_sha256 = _sha256_for(path)
+    except (OSError, HTTPError, URLError, ValueError, json.JSONDecodeError) as error:
+        return False, f"yt-dlp 공식 SHA-256을 확인하지 못해 업데이트를 중단했습니다: {error}"
+
+    if current_sha256.lower() == expected_sha256:
+        version = _version_for(path, ("--version",))
+        if not _usable_version(version):
+            return False, "yt-dlp 파일 해시는 정상이나 실행 검증에 실패했습니다. 도구 복구를 시도해 주세요."
+        return True, f"yt-dlp Nightly {version} · 이미 최신 상태이며 SHA-256 검증을 통과했습니다."
+
+    if progress is not None:
+        progress(f"yt-dlp Nightly {target_tag} 업데이트 중…")
 
     try:
         result = subprocess.run(
-            [str(path), "--update-to", "nightly"],
+            [str(path), "--update-to", f"nightly@{target_tag}"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -161,9 +376,28 @@ def update_ytdlp(progress: Callable[[str], None] | None = None) -> tuple[bool, s
             part.strip() for part in (result.stdout, result.stderr) if part and part.strip()
         )
     ).strip()
+
+    try:
+        actual_sha256 = _sha256_for(path)
+    except OSError as error:
+        return False, f"yt-dlp 업데이트 후 파일 무결성을 확인하지 못했습니다: {error}"
+    if actual_sha256.lower() != expected_sha256:
+        return False, (
+            "yt-dlp 업데이트 후 SHA-256이 공식 릴리스와 일치하지 않습니다. "
+            "도구 복구 후 다시 시도해 주세요."
+        )
+
+    verified_version = _version_for(path, ("--version",))
+    if not _usable_version(verified_version):
+        return False, "yt-dlp 업데이트 파일의 SHA-256은 일치하지만 실행 검증에 실패했습니다."
+
+    verification = f"SHA-256 및 실행 검증 완료 · {verified_version}"
     if result.returncode != 0:
-        return False, output or "yt-dlp 업데이트에 실패했습니다."
-    return True, output or "yt-dlp Nightly 업데이트 확인 완료"
+        # yt-dlp 자체 업데이터가 재시작 단계 등에서 경고/오류를 반환했더라도,
+        # RR-V가 고정한 공식 릴리스 해시와 실제 파일이 일치하고 새 실행 파일이
+        # 정상 실행되면 설치 결과 자체는 안전한 것으로 판단한다.
+        return True, f"{output}\n{verification}" if output else verification
+    return True, f"{output}\n{verification}" if output else verification
 
 
 def update_deno(progress: Callable[[str], None] | None = None) -> tuple[bool, str]:
@@ -196,21 +430,12 @@ def update_deno(progress: Callable[[str], None] | None = None) -> tuple[bool, st
     ).strip()
     if result.returncode != 0:
         return False, output or "Deno 업데이트에 실패했습니다."
-    return True, output or "Deno 업데이트 확인 완료"
 
-
-def _fetch_small_text(url: str) -> str:
-    request = Request(
-        url,
-        headers={
-            "User-Agent": f"RR-V/{APP_VERSION}",
-            "Accept": "text/plain",
-            "Cache-Control": "no-cache",
-        },
-    )
-    with urlopen(request, timeout=12) as response:
-        data = response.read(256 * 1024)
-    return data.decode("utf-8", errors="replace").strip()
+    verified_version = _version_for(path, ("--version",))
+    if not _usable_version(verified_version):
+        return False, "Deno 업데이트는 끝났지만 실행 검증에 실패했습니다. 도구 복구를 시도해 주세요."
+    verification = f"실행 검증 완료 · {verified_version}"
+    return True, f"{output}\n{verification}" if output else verification
 
 
 def _ffmpeg_release_version(value: str) -> str:
@@ -283,17 +508,6 @@ def _download_file(
                 f"✓ FFmpeg 다운로드 완료 · {downloaded / (1024 * 1024):.1f} MB\n"
                 "파일 무결성 확인 중…"
             )
-
-
-def _sha256_for(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        while True:
-            chunk = stream.read(1024 * 1024)
-            if not chunk:
-                break
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _extract_ffmpeg_pair(archive_path: Path, target_dir: Path) -> tuple[Path, Path]:
@@ -450,4 +664,24 @@ def restore_packaged_tools() -> tuple[bool, str]:
     restored = restore_bundled_tools()
     if not restored:
         return False, "복구할 수 있는 내장 도구를 찾지 못했습니다."
-    return True, f"도구 {len(restored)}개를 복구했습니다."
+
+    status_by_key = {status.key: status for status in inspect_tools()}
+    key_for_restored = {
+        "yt-dlp.exe": "ytdlp",
+        "ffmpeg.exe": "ffmpeg",
+        "ffprobe.exe": "ffprobe",
+        "deno.exe": "deno",
+        "YouTube 인증 런타임 (WPC)": "pot",
+    }
+    failed: list[str] = []
+    for item in restored:
+        key = key_for_restored.get(item)
+        if key is None:
+            continue
+        status = status_by_key.get(key)
+        if status is None or not status.available:
+            failed.append(item)
+
+    if failed:
+        return False, "복구 후 무결성 검증에 실패했습니다: " + ", ".join(failed)
+    return True, f"도구 {len(restored)}개를 복구하고 무결성 검증을 완료했습니다."
