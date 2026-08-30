@@ -4,15 +4,36 @@ $ErrorActionPreference = "Stop"
 
 $Root = $PSScriptRoot
 $InstallerScript = Join-Path $Root "installer\RR-V.iss"
+$ConstantsPath = Join-Path $Root "app\constants.py"
 $DistRoot = Join-Path $Root "dist\RR-V"
 $OutputDir = Join-Path $Root "installer-output"
-$ExpectedInstaller = Join-Path $OutputDir "RR-V_Setup_1.2.0.exe"
 
 if (-not (Test-Path $InstallerScript)) {
     throw "Installer script is missing: $InstallerScript"
 }
+if (-not (Test-Path $ConstantsPath)) {
+    throw "RR-V constants file is missing: $ConstantsPath"
+}
 if (-not (Test-Path $DistRoot)) {
     throw "dist\RR-V is missing. Run BUILD_RELEASE.ps1 first."
+}
+
+$ConstantsText = Get-Content -Path $ConstantsPath -Raw
+$AppVersionMatch = [regex]::Match($ConstantsText, 'APP_VERSION\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"')
+if (-not $AppVersionMatch.Success) {
+    throw "APP_VERSION could not be read from app\constants.py."
+}
+$AppVersion = $AppVersionMatch.Groups[1].Value
+$ExpectedInstaller = Join-Path $OutputDir ("RR-V_Setup_" + $AppVersion + ".exe")
+
+$InstallerText = Get-Content -Path $InstallerScript -Raw
+$InstallerVersionMatch = [regex]::Match($InstallerText, '#define\s+MyAppVersion\s+"([0-9]+\.[0-9]+\.[0-9]+)"')
+if (-not $InstallerVersionMatch.Success) {
+    throw "MyAppVersion could not be read from installer\RR-V.iss."
+}
+$InstallerVersion = $InstallerVersionMatch.Groups[1].Value
+if ($InstallerVersion -ne $AppVersion) {
+    throw "RR-V version mismatch. app\constants.py=$AppVersion, installer\RR-V.iss=$InstallerVersion"
 }
 
 $RunningRRV = @(
@@ -97,8 +118,9 @@ if (Test-Path $ExpectedInstaller) {
     Remove-Item -Path $ExpectedInstaller -Force
 }
 
-Write-Host "[1/3] Verifying RR-V 1.2.0 release input..."
+Write-Host "[1/3] Verifying RR-V $AppVersion release input..."
 Write-Host ("Input: " + $DistRoot)
+Write-Host "  - App/Installer version match: OK"
 Write-Host "  - Required license/source files: OK"
 Write-Host "  - External runtime tools are not bundled: OK"
 Write-Host "  - Qt Virtual Keyboard is not bundled: OK"
@@ -121,4 +143,4 @@ Write-Host ("Output: " + $ExpectedInstaller)
 Write-Host ("Size: " + [Math]::Round($InstallerInfo.Length / 1MB, 2) + " MB")
 Write-Host ("SHA-256: " + $InstallerHash)
 Write-Host ""
-Write-Host "RR-V 1.2.0 Installer is ready for installation smoke testing."
+Write-Host "RR-V $AppVersion Installer is ready for installation smoke testing."
