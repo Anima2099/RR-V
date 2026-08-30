@@ -7,24 +7,36 @@ import threading
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
-from app.app_update import AppUpdateResult, RELEASES_PAGE_URL, check_app_update
-from app.constants import APP_VERSION
+from app.app_update import (
+    AppUpdateResult,
+    RELEASES_PAGE_URL,
+    UPDATE_CHANNEL_BETA,
+    UPDATE_CHANNEL_STABLE,
+    check_app_update,
+    normalize_update_channel,
+    update_channel_label,
+)
+from app.constants import APP_RELEASE_CHANNEL, APP_VERSION
+from app.settings_store import get_settings
 from ui.widgets.common import create_card
 
 
 GITHUB_PROFILE_URL = "https://github.com/Anima2099"
 BUY_ME_A_COFFEE_URL = "https://buymeacoffee.com/anima2099"
 DEVELOPER_EMAIL = "anima2099@proton.me"
+_UPDATE_CHANNEL_SETTING_KEY = "updates/channel"
 
 
 class AboutPage(QWidget):
@@ -32,8 +44,19 @@ class AboutPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
+        self._settings = get_settings()
         self._update_check_running = False
         self._release_url = RELEASES_PAGE_URL
+        self._update_channel = normalize_update_channel(
+            str(
+                self._settings.value(
+                    _UPDATE_CHANNEL_SETTING_KEY,
+                    APP_RELEASE_CHANNEL,
+                )
+                or APP_RELEASE_CHANNEL
+            ),
+            APP_RELEASE_CHANNEL,
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 24, 28, 24)
@@ -87,7 +110,12 @@ class AboutPage(QWidget):
         product = QLabel("Video Downloader & Media Tools")
         product.setObjectName("settingsGroupTitle")
 
-        version = QLabel(f"Version {APP_VERSION} · Community Beta")
+        build_label = (
+            "Community Beta"
+            if normalize_update_channel(APP_RELEASE_CHANNEL) == UPDATE_CHANNEL_BETA
+            else "Stable"
+        )
+        version = QLabel(f"Version {APP_VERSION} · {build_label}")
         version.setObjectName("mutedText")
 
         description = QLabel(
@@ -145,10 +173,46 @@ class AboutPage(QWidget):
         title.setObjectName("sectionTitle")
 
         description = QLabel(
-            "GitHub Releases에서 RR-V의 새 버전을 확인합니다. 업데이트가 있으면 릴리스 페이지에서 새 설치 파일을 받을 수 있습니다."
+            "선택한 업데이트 채널을 기준으로 GitHub Releases에서 RR-V의 새 버전을 확인합니다. "
+            "업데이트가 있으면 릴리스 페이지에서 새 설치 파일을 받을 수 있습니다."
         )
         description.setObjectName("bodyText")
         description.setWordWrap(True)
+
+        channel_title = QLabel("업데이트 채널")
+        channel_title.setObjectName("settingsGroupTitle")
+
+        self.update_channel_group = QButtonGroup(self)
+        self.update_channel_group.setExclusive(True)
+
+        self.stable_channel_radio = QRadioButton("정식")
+        self.stable_channel_radio.setObjectName("settingsRadioButton")
+        self.beta_channel_radio = QRadioButton("베타")
+        self.beta_channel_radio.setObjectName("settingsRadioButton")
+        self.update_channel_group.addButton(self.stable_channel_radio)
+        self.update_channel_group.addButton(self.beta_channel_radio)
+
+        self.stable_channel_radio.setChecked(
+            self._update_channel == UPDATE_CHANNEL_STABLE
+        )
+        self.beta_channel_radio.setChecked(
+            self._update_channel == UPDATE_CHANNEL_BETA
+        )
+        self.stable_channel_radio.clicked.connect(self._update_channel_changed)
+        self.beta_channel_radio.clicked.connect(self._update_channel_changed)
+
+        channel_row = QHBoxLayout()
+        channel_row.setSpacing(18)
+        channel_row.addWidget(channel_title)
+        channel_row.addWidget(self.stable_channel_radio)
+        channel_row.addWidget(self.beta_channel_radio)
+        channel_row.addStretch()
+
+        channel_hint = QLabel(
+            "정식은 정식 배포만 확인하고, 베타는 정식과 베타 배포를 모두 확인합니다."
+        )
+        channel_hint.setObjectName("mutedText")
+        channel_hint.setWordWrap(True)
 
         grid = QGridLayout()
         grid.setHorizontalSpacing(18)
@@ -156,7 +220,9 @@ class AboutPage(QWidget):
 
         current_title = QLabel("현재 버전")
         current_title.setObjectName("settingsGroupTitle")
-        current_value = QLabel(APP_VERSION)
+        current_value = QLabel(
+            f"{APP_VERSION} · {update_channel_label(APP_RELEASE_CHANNEL)}"
+        )
         current_value.setObjectName("mutedText")
 
         latest_title = QLabel("최신 버전")
@@ -191,6 +257,8 @@ class AboutPage(QWidget):
 
         card_layout.addWidget(title)
         card_layout.addWidget(description)
+        card_layout.addLayout(channel_row)
+        card_layout.addWidget(channel_hint)
         card_layout.addLayout(grid)
         card_layout.addWidget(self.update_status_label)
         card_layout.addLayout(button_row)
@@ -238,17 +306,44 @@ class AboutPage(QWidget):
         card_layout.addWidget(support_hint)
         return card
 
+    def _update_channel_changed(self) -> None:
+        selected = (
+            UPDATE_CHANNEL_BETA
+            if self.beta_channel_radio.isChecked()
+            else UPDATE_CHANNEL_STABLE
+        )
+        if selected == self._update_channel:
+            return
+
+        self._update_channel = selected
+        self._settings.setValue(_UPDATE_CHANNEL_SETTING_KEY, selected)
+        self._settings.sync()
+        self._release_url = RELEASES_PAGE_URL
+        self.latest_version_label.setText("확인 전")
+        self.release_button.setEnabled(False)
+        self.update_status_label.setText(
+            f"{update_channel_label(selected)} 채널로 변경했습니다. 업데이트 확인을 눌러 주세요."
+        )
+
+    def _set_channel_controls_enabled(self, enabled: bool) -> None:
+        self.stable_channel_radio.setEnabled(enabled)
+        self.beta_channel_radio.setEnabled(enabled)
+
     def _start_update_check(self) -> None:
         if self._update_check_running:
             return
         self._update_check_running = True
         self.check_update_button.setEnabled(False)
         self.release_button.setEnabled(False)
+        self._set_channel_controls_enabled(False)
         self.latest_version_label.setText("확인 중…")
-        self.update_status_label.setText("GitHub Releases에서 최신 버전을 확인하는 중…")
+        channel_label = update_channel_label(self._update_channel)
+        self.update_status_label.setText(
+            f"GitHub Releases에서 {channel_label} 채널의 최신 버전을 확인하는 중…"
+        )
 
         def run() -> None:
-            result = check_app_update()
+            result = check_app_update(update_channel=self._update_channel)
             self.update_check_finished.emit(result)
 
         threading.Thread(target=run, daemon=True).start()
@@ -256,7 +351,14 @@ class AboutPage(QWidget):
     def _update_check_done(self, result: AppUpdateResult) -> None:
         self._update_check_running = False
         self.check_update_button.setEnabled(True)
-        self.latest_version_label.setText(result.latest_version)
+        self._set_channel_controls_enabled(True)
+
+        latest_text = result.latest_version
+        if result.latest_release_channel:
+            latest_text = (
+                f"{latest_text} · {update_channel_label(result.latest_release_channel)}"
+            )
+        self.latest_version_label.setText(latest_text)
         self.update_status_label.setText(result.message)
         self._release_url = result.release_url or RELEASES_PAGE_URL
         self.release_button.setEnabled(bool(result.update_available))
