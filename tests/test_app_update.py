@@ -8,6 +8,7 @@ from app.app_update import (
     UPDATE_CHANNEL_BETA,
     UPDATE_CHANNEL_STABLE,
     _display_version,
+    _installer_asset_from_release,
     _release_channel,
     _select_latest_release,
     _version_tuple,
@@ -36,18 +37,37 @@ class AppUpdateVersionTests(unittest.TestCase):
 
 class AppUpdateChannelTests(unittest.TestCase):
     @staticmethod
+    def _asset(
+        version: str,
+        *,
+        digest: str | None = None,
+        size: int = 46_000_000,
+    ) -> dict[str, object]:
+        return {
+            "name": f"RR-V_Setup_{version}.exe",
+            "browser_download_url": (
+                "https://github.com/Anima2099/RR-V/releases/download/"
+                f"v{version}/RR-V_Setup_{version}.exe"
+            ),
+            "digest": digest or ("sha256:" + "a" * 64),
+            "size": size,
+        }
+
+    @staticmethod
     def _release(
         tag: str,
         *,
         prerelease: bool,
         draft: bool = False,
         url: str | None = None,
+        assets: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
         return {
             "tag_name": tag,
             "prerelease": prerelease,
             "draft": draft,
             "html_url": url or f"https://example.test/{tag}",
+            "assets": list(assets or []),
         }
 
     def test_channel_labels_are_korean(self) -> None:
@@ -111,6 +131,26 @@ class AppUpdateChannelTests(unittest.TestCase):
         release, _channel = selected or ({}, "")
         self.assertEqual(release.get("tag_name"), "v1.3.0")
 
+    def test_installer_asset_requires_github_sha256_digest(self) -> None:
+        release = self._release(
+            "v1.4.0-community-beta",
+            prerelease=True,
+            assets=[self._asset("1.4.0", digest="")],
+        )
+        release["assets"][0]["digest"] = None  # type: ignore[index]
+        self.assertIsNone(_installer_asset_from_release(release))
+
+    def test_installer_asset_selects_verified_setup_executable(self) -> None:
+        release = self._release(
+            "v1.4.0-community-beta",
+            prerelease=True,
+            assets=[self._asset("1.4.0")],
+        )
+        asset = _installer_asset_from_release(release)
+        self.assertIsNotNone(asset)
+        self.assertEqual(asset.name, "RR-V_Setup_1.4.0.exe")  # type: ignore[union-attr]
+        self.assertEqual(asset.sha256, "a" * 64)  # type: ignore[union-attr]
+
     @patch("app.app_update.fetch_https_bytes")
     def test_current_beta_can_update_to_same_version_stable(self, fetch) -> None:  # type: ignore[no-untyped-def]
         payload = [self._release("v1.3.0", prerelease=False)]
@@ -133,6 +173,23 @@ class AppUpdateChannelTests(unittest.TestCase):
         self.assertFalse(result.update_available)
         self.assertEqual(result.latest_version, "릴리스 없음")
         self.assertIn("정식 릴리스가 없습니다", result.message)
+
+    @patch("app.app_update.fetch_https_bytes")
+    def test_update_result_exposes_verified_installer(self, fetch) -> None:  # type: ignore[no-untyped-def]
+        payload = [
+            self._release(
+                "v1.4.0-community-beta",
+                prerelease=True,
+                assets=[self._asset("1.4.0")],
+            )
+        ]
+        fetch.return_value = json.dumps(payload).encode("utf-8")
+
+        result = check_app_update(update_channel=UPDATE_CHANNEL_BETA)
+
+        self.assertTrue(result.update_available)
+        self.assertIsNotNone(result.installer)
+        self.assertEqual(result.installer.name, "RR-V_Setup_1.4.0.exe")  # type: ignore[union-attr]
 
 
 if __name__ == "__main__":
