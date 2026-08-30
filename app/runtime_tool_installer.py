@@ -37,6 +37,14 @@ class ReleaseAsset:
     tag: str
 
 
+_DIAGNOSTIC_STATUS_KEYS = {
+    "yt-dlp Nightly": "ytdlp",
+    "FFmpeg / FFprobe": "ffmpeg",
+    "Deno": "deno",
+    "YouTube 인증 런타임": "pot",
+}
+
+
 def _creation_flags() -> int:
     return subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
@@ -47,6 +55,119 @@ def _looks_like_certificate_error(message: str) -> bool:
         "CERTIFICATE_VERIFY_FAILED" in normalized
         or "CERTIFICATE VERIFY FAILED" in normalized
         or "UNABLE TO GET LOCAL ISSUER CERTIFICATE" in normalized
+    )
+
+
+def _diagnostic_code(label: str, ok: bool, message: str) -> str:
+    """Return a compact support code that remains readable in screenshots."""
+
+    normalized = str(message or "").casefold()
+    if ok:
+        if label == "YouTube 인증 런타임" and "복구" in normalized:
+            return "WPC_RESTORE_OK"
+        return {
+            "yt-dlp Nightly": "YTDLP_OK",
+            "FFmpeg / FFprobe": "FFMPEG_OK",
+            "Deno": "DENO_OK",
+            "YouTube 인증 런타임": "WPC_OK",
+        }.get(label, "TOOL_OK")
+
+    if label == "yt-dlp Nightly":
+        if "인증서" in normalized or "certificate" in normalized:
+            return "YTDLP_TLS_FAILED"
+        if "sha-256" in normalized or "해시" in normalized:
+            return (
+                "YTDLP_HASH_MISMATCH"
+                if "일치하지" in normalized
+                else "YTDLP_HASH_CHECK_FAILED"
+            )
+        if "실행" in normalized:
+            return "YTDLP_EXEC_FAILED"
+        return "YTDLP_UPDATE_FAILED"
+
+    if label == "FFmpeg / FFprobe":
+        if "sha-256" in normalized:
+            return (
+                "FFMPEG_HASH_MISMATCH"
+                if "일치하지" in normalized
+                else "FFMPEG_HASH_CHECK_FAILED"
+            )
+        if "버전 검증" in normalized or "실행 검증" in normalized:
+            return "FFMPEG_VERIFY_FAILED"
+        if "교체" in normalized or "이전 버전으로 복구" in normalized:
+            return "FFMPEG_REPLACE_FAILED"
+        return "FFMPEG_UPDATE_FAILED"
+
+    if label == "Deno":
+        if "인증서" in normalized or "certificate" in normalized:
+            return "DENO_TLS_FAILED"
+        if "실행" in normalized:
+            return "DENO_EXEC_FAILED"
+        return "DENO_UPDATE_FAILED"
+
+    if label == "YouTube 인증 런타임":
+        if "복구 후 sha-256" in normalized:
+            return "WPC_RESTORE_VERIFY_FAILED"
+        if "검증본을 복구하지" in normalized:
+            return "WPC_RESTORE_FAILED"
+        return "WPC_INTEGRITY_FAILED"
+
+    return "TOOL_ACTION_FAILED"
+
+
+def _final_status_text(label: str, status_by_key: dict[str, object]) -> str:
+    def state_text(status: object | None) -> str:
+        if status is None:
+            return "확인 실패"
+        available = bool(getattr(status, "available", False))
+        version = str(getattr(status, "version", "") or "").strip() or "확인 불가"
+        if available:
+            return f"정상 · {version}"
+        if version.casefold() in {"없음", "none"}:
+            return "설치 필요 · 파일 없음"
+        return f"복구 필요 · {version}"
+
+    if label == "FFmpeg / FFprobe":
+        ffmpeg = status_by_key.get("ffmpeg")
+        ffprobe = status_by_key.get("ffprobe")
+        if ffmpeg is None and ffprobe is None:
+            return "확인 실패"
+        if (
+            ffmpeg is not None
+            and ffprobe is not None
+            and bool(getattr(ffmpeg, "available", False))
+            and bool(getattr(ffprobe, "available", False))
+        ):
+            ffmpeg_version = str(getattr(ffmpeg, "version", "") or "확인 불가")
+            ffprobe_version = str(getattr(ffprobe, "version", "") or "확인 불가")
+            if ffmpeg_version == ffprobe_version:
+                return f"정상 · {ffmpeg_version}"
+            return f"복구 필요 · ffmpeg {ffmpeg_version} / ffprobe {ffprobe_version}"
+        details = []
+        if ffmpeg is not None:
+            details.append(f"ffmpeg {state_text(ffmpeg)}")
+        if ffprobe is not None:
+            details.append(f"ffprobe {state_text(ffprobe)}")
+        return " / ".join(details) if details else "확인 실패"
+
+    key = _DIAGNOSTIC_STATUS_KEYS.get(label, "")
+    return state_text(status_by_key.get(key))
+
+
+def _format_diagnostic_block(
+    label: str,
+    ok: bool,
+    message: str,
+    status_by_key: dict[str, object],
+) -> str:
+    detail = str(message or "상세 정보 없음").strip()
+    indented_detail = "\n".join(f"  {line}" for line in detail.splitlines())
+    return (
+        f"[{label}]\n"
+        f"처리 결과: {'성공' if ok else '실패'}\n"
+        f"검사/작업 상세:\n{indented_detail}\n"
+        f"최종 상태: {_final_status_text(label, status_by_key)}\n"
+        f"진단 코드: {_diagnostic_code(label, ok, detail)}"
     )
 
 
@@ -306,19 +427,29 @@ def ensure_wpc_runtime(progress: ProgressCallback | None = None) -> tuple[bool, 
 def ensure_runtime_tools(progress: ProgressCallback | None = None) -> tuple[bool, str]:
     """필수 외부 도구와 인증 런타임을 설치·업데이트하고 무결성을 확인한다."""
     actions = (
-        ("yt-dlp", ensure_ytdlp),
+        ("yt-dlp Nightly", ensure_ytdlp),
         ("FFmpeg / FFprobe", update_ffmpeg_release),
         ("Deno", ensure_deno),
         ("YouTube 인증 런타임", ensure_wpc_runtime),
     )
 
-    messages: list[str] = []
+    results: list[tuple[str, bool, str]] = []
     all_ok = True
     for label, action in actions:
         if progress is not None:
             progress(f"{label} 준비 중…")
         ok, message = action(progress)
         all_ok = all_ok and ok
-        messages.append(("✓ " if ok else "✕ ") + message)
+        results.append((label, ok, message))
 
-    return all_ok, "\n".join(messages)
+    try:
+        status_by_key = {status.key: status for status in inspect_tools()}
+    except Exception:
+        # 진단 화면 생성 실패가 이미 끝난 도구 작업의 결과를 가리지 않도록 한다.
+        status_by_key = {}
+
+    blocks = [
+        _format_diagnostic_block(label, ok, message, status_by_key)
+        for label, ok, message in results
+    ]
+    return all_ok, "\n\n".join(blocks)
