@@ -107,13 +107,13 @@ class SourceSyntaxTests(unittest.TestCase):
             for node in ast.walk(done_method)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
         }
-        attributes = {
-            node.attr
+        string_constants = {
+            node.value
             for node in ast.walk(done_method)
-            if isinstance(node, ast.Attribute)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
         }
         self.assertIn("_apply_inspected_tool_statuses", called_methods)
-        self.assertIn("installed_statuses", attributes)
+        self.assertIn("installed_statuses", string_constants)
 
 
 if __name__ == "__main__":
