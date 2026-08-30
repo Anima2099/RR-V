@@ -146,7 +146,6 @@ def _installer_asset_from_release(item: dict[str, object]) -> AppInstallerAsset 
 
     expected_version = _display_version(str(item.get("tag_name") or ""))
     expected_name = f"RR-V_Setup_{expected_version}.exe".casefold()
-    candidates: list[tuple[int, AppInstallerAsset]] = []
 
     for raw_asset in assets:
         if not isinstance(raw_asset, dict):
@@ -155,7 +154,8 @@ def _installer_asset_from_release(item: dict[str, object]) -> AppInstallerAsset 
         name = str(raw_asset.get("name") or "").strip()
         normalized_name = name.casefold()
         if (
-            not normalized_name.startswith(_INSTALLER_NAME_PREFIX)
+            normalized_name != expected_name
+            or not normalized_name.startswith(_INSTALLER_NAME_PREFIX)
             or not normalized_name.endswith(".exe")
             or "/" in name
             or "\\" in name
@@ -171,20 +171,17 @@ def _installer_asset_from_release(item: dict[str, object]) -> AppInstallerAsset 
             size = int(raw_asset.get("size") or 0)
         except (TypeError, ValueError):
             size = 0
-        if size < 0 or size > _INSTALLER_MAX_SIZE:
+        if size <= 0 or size > _INSTALLER_MAX_SIZE:
             continue
 
-        asset = AppInstallerAsset(
+        return AppInstallerAsset(
             name=name,
             url=url,
             sha256=sha256,
             size=size,
         )
-        candidates.append((1 if normalized_name == expected_name else 0, asset))
 
-    if not candidates:
-        return None
-    return max(candidates, key=lambda candidate: candidate[0])[1]
+    return None
 
 
 def _result(
