@@ -20,6 +20,7 @@ from app.general_preferences import (
 )
 from app.paths import RRV_TOOLS_DIR, find_executable
 from core.download_task import DownloadTask
+from services.cookie_work_file import cleanup_cookie_work_copy_from_command
 from services.ytdlp_service import YtDlpService
 
 
@@ -224,6 +225,7 @@ class YtDlpDownloadService:
                 **popen_kwargs,
             )
         except OSError as error:
+            cleanup_cookie_work_copy_from_command(command)
             raise DownloadExecutionError(
                 "yt-dlp.exe를 실행하지 못했습니다.",
                 str(error),
@@ -301,6 +303,7 @@ class YtDlpDownloadService:
         finally:
             with self._process_lock:
                 self._process = None
+            cleanup_cookie_work_copy_from_command(command)
 
         elapsed_ms = (perf_counter() - started) * 1000.0
 
