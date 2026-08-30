@@ -132,6 +132,7 @@ class CommunitySettingsPage(ThemeSettingsPage):
         return self._create_scroll_page(
             [
                 self._create_tools_and_updates_card(),
+                self._create_tool_diagnostics_card(),
                 self._create_tool_guide_card(),
             ]
         )
