@@ -8,11 +8,11 @@
 
 **RR-V**는 널리 사용되는 오픈소스 영상 다운로드 도구 **yt-dlp**를 복잡한 명령어 없이 쉽고 빠르게 사용할 수 있도록 만든 Windows용 비디오 다운로드 & 미디어 도구입니다.
 
-**현재 버전: 1.2.0 Community Beta**
+**현재 버전: 1.3.0 Community Beta**
 
 ➡️ **[최신 버전 다운로드 · GitHub Releases](https://github.com/Anima2099/RR-V/releases)**
 
-설치 파일은 GitHub Releases에서 `RR-V_Setup_1.2.0.exe` 형태로 배포합니다.
+설치 파일은 GitHub Releases에서 `RR-V_Setup_1.3.0.exe` 형태로 배포합니다.
 
 ---
 
@@ -25,6 +25,8 @@
 - 실패 작업 일괄 재시도와 전체 · 완료 · 실패 목록 TXT 내보내기 / 불러오기
 - 사용자 다운로드 프리셋 생성 · 수정 · 삭제 및 기본 프리셋 지정
 - Chrome / Edge 브라우저 확장 프로그램을 이용한 빠른 URL 전송 및 다운로드
+- **정식 / 베타 채널을 지원하는 RR-V 자체 업데이트 기능**
+- yt-dlp / FFmpeg / FFprobe / Deno 상태 확인, 업데이트 및 복구 지원
 - 영상을 **WebP · GIF · APNG · AVIF** 애니메이션 이미지로 단일 / 일괄 변환
 - 단일 및 일괄 영상 썸네일 교체
 - 영상 프레임 스냅샷 제작
@@ -60,6 +62,14 @@ RR-V를 처음 설치했다면 몇 가지 필수 구성요소를 준비해야 �
 
 RR-V는 필요한 `yt-dlp`, `FFmpeg / FFprobe`, `Deno`를 설치 파일 안에 포함하지 않습니다. 대신 필요한 경우 각 프로젝트의 공식 배포처에서 다운로드하여 사용자의 RR-V 데이터 폴더에 설치합니다.
 
+## 프로그램 업데이트
+
+RR-V 1.3.0부터 프로그램 자체 업데이트 기능을 지원합니다.
+
+**정식 / 베타 업데이트 채널**을 선택할 수 있으며, 새 버전이 있으면 GitHub Releases의 Installer를 내려받아 파일 크기와 SHA-256 무결성 검증을 완료한 뒤 RR-V를 종료하고 설치 프로그램을 실행합니다.
+
+> RR-V 1.2.0에는 자체 업데이트 기능이 없습니다. 기존 1.2.0 사용자는 `RR-V_Setup_1.3.0.exe`를 한 번 직접 설치해 주세요. 이후 버전부터는 RR-V 내부의 업데이트 기능을 사용할 수 있습니다.
+
 ## 사이트 로그인
 
 일부 영상은 로그인 또는 인증이 필요할 수 있습니다.
@@ -90,9 +100,9 @@ RR-V에는 Chrome / Edge용 **RR-V Browser Connector**가 포함되어 있습니
 
 ## Community Beta
 
-RR-V 1.2.0은 **Community Beta** 버전입니다.
+RR-V 1.3.0은 **Community Beta** 버전입니다.
 
-기본 기능과 설치, 다운로드, 사이트 인증 등의 주요 동작은 테스트를 거쳤지만 영상 사이트의 정책 변화, 사용자 PC 환경, 네트워크 상태 등에 따라 예상하지 못한 문제가 발생할 수 있습니다.
+기본 기능과 설치, 버전 업그레이드, 다운로드, 사이트 인증, Browser Connector, 미디어 도구 및 자체 업데이트 등의 주요 동작은 실제 환경에서 테스트를 거쳤지만 영상 사이트의 정책 변화, 사용자 PC 환경, 네트워크 상태 등에 따라 예상하지 못한 문제가 발생할 수 있습니다.
 
 RR-V의 다운로드 기능은 yt-dlp를 기반으로 하므로 각 사이트의 변경이나 현재 yt-dlp 지원 상태에 따라 일부 사이트의 동작이 달라질 수 있습니다.
 
@@ -136,9 +146,9 @@ RR-V는 **Source Available** 소프트웨어이며, OSI가 정의하는 오픈�
 
 아래 내용은 RR-V의 소스 구조, 빌드 방식 및 제3자 구성요소의 배포 구조에 관한 개발자용 정보입니다.
 
-## 1.2.0 Distribution Model
+## 1.3.0 Distribution Model
 
-RR-V 1.2.0 uses a PyInstaller **onedir** layout.
+RR-V 1.3.0 uses a PyInstaller **onedir** layout.
 
 ```text
 dist/RR-V/
@@ -204,7 +214,7 @@ main.py                 application entry point
 RR-V.spec               PyInstaller onedir build specification
 RR-V-Auth-Helper.spec   separate Auth Helper build specification
 BUILD_RELEASE.ps1       integrated release build and license/source packaging
-BUILD_INSTALLER.ps1     verifies dist/RR-V and builds RR-V_Setup_1.2.0.exe
+BUILD_INSTALLER.ps1     verifies dist/RR-V and builds RR-V_Setup_1.3.0.exe
 PREP_WPC_PROVIDER.ps1   prepares the locked WPC/nodriver runtime
 PACKAGING_CHECKLIST.txt release/regression checklist
 LICENSE                 authoritative RR-V Source Available License 1.0 text
@@ -233,7 +243,7 @@ Prepare the exact WPC/nodriver runtime with:
 powershell -ExecutionPolicy Bypass -File .\PREP_WPC_PROVIDER.ps1
 ```
 
-Create the complete 1.2.0 onedir release with:
+Create the complete 1.3.0 onedir release with:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\BUILD_RELEASE.ps1
@@ -250,7 +260,7 @@ powershell -ExecutionPolicy Bypass -File .\BUILD_INSTALLER.ps1
 Expected output:
 
 ```text
-installer-output\RR-V_Setup_1.2.0.exe
+installer-output\RR-V_Setup_1.3.0.exe
 ```
 
 `BUILD_INSTALLER.ps1` verifies the release layout and license files again, rejects accidentally bundled external tools or Qt Virtual Keyboard, finds `ISCC.exe`, compiles the Installer, and prints its SHA-256 hash. See `installer/README.md` for the install/uninstall policy and smoke-test flow.
@@ -287,4 +297,4 @@ External yt-dlp / FFmpeg / Deno executables downloaded after installation remain
 
 ## Project Status
 
-`main` contains the current **RR-V 1.2.0 Community Beta** release source. The `1.2.0-community-beta` branch is retained as the Community Beta development/release line, and the 1.1.3 tested baseline is preserved separately on `1.1.3-community-beta`.
+`main` contains the current **RR-V 1.3.0 Community Beta** source. The `1.3.0-community-beta` branch is retained as the current Community Beta development/release line. Previous release lines such as `1.2.0-community-beta` and the 1.1.3 tested baseline are preserved separately.
