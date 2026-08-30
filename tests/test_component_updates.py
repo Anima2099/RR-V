@@ -7,21 +7,37 @@ import unittest
 
 # component_updates의 순수 버전 처리 로직만 검사한다.
 # RR-V GUI 런타임(PySide6)이나 실제 외부 도구 설치 여부가 테스트 실행 환경에
-# 영향을 주지 않도록, import 시 필요한 두 모듈만 가벼운 테스트 대역으로 둔다.
+# 영향을 주지 않도록, import 순간에 필요한 두 모듈만 가벼운 테스트 대역으로 둔다.
+# 다른 테스트가 실제 app.tool_manager / app.settings_store를 import할 수 있도록
+# component_updates import가 끝난 즉시 sys.modules를 원래 상태로 되돌린다.
+_previous_settings_store = sys.modules.get("app.settings_store")
+_previous_tool_manager = sys.modules.get("app.tool_manager")
+
 _settings_store_stub = ModuleType("app.settings_store")
 _settings_store_stub.get_settings = lambda: None
-sys.modules["app.settings_store"] = _settings_store_stub
-
 _tool_manager_stub = ModuleType("app.tool_manager")
 _tool_manager_stub.inspect_tools = lambda: ()
+
+sys.modules["app.settings_store"] = _settings_store_stub
 sys.modules["app.tool_manager"] = _tool_manager_stub
 
-from app.component_updates import (  # noqa: E402
-    _local_signature,
-    _normalize_ytdlp_version,
-    _release_tuple,
-    normalize_ffmpeg_release_version,
-)
+try:
+    from app.component_updates import (  # noqa: E402
+        _local_signature,
+        _normalize_ytdlp_version,
+        _release_tuple,
+        normalize_ffmpeg_release_version,
+    )
+finally:
+    if _previous_settings_store is None:
+        sys.modules.pop("app.settings_store", None)
+    else:
+        sys.modules["app.settings_store"] = _previous_settings_store
+
+    if _previous_tool_manager is None:
+        sys.modules.pop("app.tool_manager", None)
+    else:
+        sys.modules["app.tool_manager"] = _previous_tool_manager
 
 
 class ComponentUpdateTests(unittest.TestCase):
