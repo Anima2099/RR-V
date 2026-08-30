@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime
+from pathlib import Path
 import threading
 
 from PySide6.QtCore import QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -21,7 +24,7 @@ from app.component_updates import (
     normalize_ffmpeg_release_version,
 )
 from app.constants import APP_VERSION
-from app.paths import RRV_TOOLS_DIR
+from app.paths import RRV_LOGS_DIR, RRV_TOOLS_DIR
 from app.runtime_tool_installer import ensure_runtime_tools
 from app.theme import (
     THEME_DARK,
@@ -37,13 +40,18 @@ from app.tool_sources import (
     WPC_RELEASES_PAGE,
     YTDLP_RELEASES_PAGE,
 )
-from ui.dialogs.warm_dialogs import ask_warm_question
+from ui.dialogs.warm_dialogs import (
+    ask_warm_question,
+    show_warm_message,
+    show_warm_report,
+)
 from ui.pages.settings_page import SettingsPage
 from ui.widgets.common import create_card
 
 
 GITHUB_PROFILE_URL = "https://github.com/Anima2099"
 BUY_ME_A_COFFEE_URL = "https://buymeacoffee.com/anima2099"
+_TOOL_DIAGNOSTIC_LATEST_PATH = RRV_LOGS_DIR / "tool_diagnostics_latest.txt"
 
 
 class ThemeSettingsPage(SettingsPage):
@@ -54,12 +62,16 @@ class ThemeSettingsPage(SettingsPage):
     ABOUT_TAB = 6
 
     def __init__(self) -> None:
-        super().__init__()
         self._component_check_running = False
         self._last_component_result: ComponentUpdateCheckResult | None = None
         self._tools_tab_checked_once = False
         self._missing_runtime_keys: set[str] = set()
         self._repair_runtime_keys: set[str] = set()
+        self._latest_tool_diagnostic_report = ""
+        self._latest_tool_diagnostic_at: datetime | None = None
+        self._load_latest_tool_diagnostic_report()
+
+        super().__init__()
         self.component_check_finished.connect(self._component_check_done)
 
         self.settings_stack.addWidget(self._create_about_tab())
@@ -80,6 +92,7 @@ class ThemeSettingsPage(SettingsPage):
             tab_bar.layout().addWidget(info_button, 1)
 
         self._refresh_tool_status()
+        self._refresh_tool_diagnostic_card()
 
     def _create_general_tab(self):  # type: ignore[no-untyped-def]
         return self._create_scroll_page(
@@ -96,6 +109,7 @@ class ThemeSettingsPage(SettingsPage):
         return self._create_scroll_page(
             [
                 self._create_tools_and_updates_card(),
+                self._create_tool_diagnostics_card(),
                 self._create_logs_card(),
                 self._create_diagnostics_card(),
             ]
@@ -225,15 +239,10 @@ class ThemeSettingsPage(SettingsPage):
         title = QLabel("도구 및 업데이트")
         title.setObjectName("sectionTitle")
         description = QLabel(
-            "RR-V가 사용하는 외부 실행 도구를 관리합니다. "
-            "도구가 없으면 각 공식 배포처에서 내려받아 설치하고, 이미 있으면 최신 상태로 맞춥니다."
+            "RR-V가 사용하는 외부 실행 도구의 설치 상태와 최신 버전을 확인합니다."
         )
         description.setObjectName("bodyText")
         description.setWordWrap(True)
-
-        path_label = QLabel(str(RRV_TOOLS_DIR))
-        path_label.setObjectName("mutedText")
-        path_label.setWordWrap(True)
 
         self.tool_status_labels: dict[str, QLabel] = {}
         self.tool_version_labels: dict[str, QLabel] = {}
@@ -282,10 +291,6 @@ class ThemeSettingsPage(SettingsPage):
         self.component_update_status.setObjectName("mutedText")
         self.component_update_status.setWordWrap(True)
 
-        self.tool_action_label = QLabel("")
-        self.tool_action_label.setObjectName("mutedText")
-        self.tool_action_label.setWordWrap(True)
-
         open_button = QPushButton("도구 폴더 열기")
         open_button.setObjectName("secondaryButton")
         open_button.clicked.connect(self._open_tools_folder)
@@ -309,11 +314,47 @@ class ThemeSettingsPage(SettingsPage):
 
         layout.addWidget(title)
         layout.addWidget(description)
-        layout.addWidget(path_label)
         layout.addLayout(tool_grid)
         layout.addWidget(self.component_update_status)
-        layout.addWidget(self.tool_action_label)
         layout.addLayout(action_row)
+        return card
+
+    def _create_tool_diagnostics_card(self) -> QFrame:
+        card, layout = create_card()
+
+        title = QLabel("도구 진단 결과")
+        title.setObjectName("sectionTitle")
+
+        description = QLabel(
+            "최근 도구 검사·업데이트·복구의 상세 결과입니다. 문제가 생기면 상세 화면을 캡처하거나 TXT 파일을 공유해 주세요."
+        )
+        description.setObjectName("bodyText")
+        description.setWordWrap(True)
+
+        self.tool_action_label = QLabel("")
+        self.tool_action_label.setObjectName("mutedText")
+        self.tool_action_label.setWordWrap(True)
+
+        self.tool_diagnostic_view_button = QPushButton("상세 결과 보기")
+        self.tool_diagnostic_view_button.setObjectName("secondaryButton")
+        self.tool_diagnostic_view_button.clicked.connect(self._show_tool_diagnostic_report)
+
+        self.tool_diagnostic_export_button = QPushButton("TXT로 내보내기")
+        self.tool_diagnostic_export_button.setObjectName("secondaryButton")
+        self.tool_diagnostic_export_button.clicked.connect(self._export_tool_diagnostic_report)
+
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
+        button_row.addStretch()
+        button_row.addWidget(self.tool_diagnostic_view_button)
+        button_row.addWidget(self.tool_diagnostic_export_button)
+
+        layout.addWidget(title)
+        layout.addWidget(description)
+        layout.addWidget(self.tool_action_label)
+        layout.addLayout(button_row)
+
+        self._refresh_tool_diagnostic_card()
         return card
 
     @staticmethod
@@ -338,6 +379,125 @@ class ThemeSettingsPage(SettingsPage):
             message = "저장됨 · RR-V 재시작 후 적용"
         self.theme_save_status.setText(message)
         QTimer.singleShot(3200, lambda: self.theme_save_status.setText(""))
+
+    def _load_latest_tool_diagnostic_report(self) -> None:
+        try:
+            if not _TOOL_DIAGNOSTIC_LATEST_PATH.is_file():
+                return
+            report = _TOOL_DIAGNOSTIC_LATEST_PATH.read_text(
+                encoding="utf-8-sig",
+                errors="replace",
+            ).strip()
+            if not report:
+                return
+            self._latest_tool_diagnostic_report = report
+            self._latest_tool_diagnostic_at = datetime.fromtimestamp(
+                _TOOL_DIAGNOSTIC_LATEST_PATH.stat().st_mtime
+            )
+        except OSError:
+            self._latest_tool_diagnostic_report = ""
+            self._latest_tool_diagnostic_at = None
+
+    def _build_tool_diagnostic_report(self, message: str, when: datetime) -> str:
+        detail = str(message or "상세 결과 없음").strip()
+        return "\n".join(
+            (
+                "RR-V 도구 진단 결과",
+                f"RR-V 버전: {APP_VERSION} Community Beta",
+                f"진단 시각: {when.strftime('%Y-%m-%d %H:%M:%S')}",
+                "",
+                detail,
+            )
+        )
+
+    def _store_latest_tool_diagnostic_report(self, report: str, when: datetime) -> None:
+        self._latest_tool_diagnostic_report = report
+        self._latest_tool_diagnostic_at = when
+        try:
+            RRV_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+            _TOOL_DIAGNOSTIC_LATEST_PATH.write_text(report, encoding="utf-8-sig")
+        except OSError:
+            pass
+
+    def _refresh_tool_diagnostic_card(self) -> None:
+        if not hasattr(self, "tool_action_label"):
+            return
+        has_report = bool(self._latest_tool_diagnostic_report.strip())
+        if has_report:
+            if self._latest_tool_diagnostic_at is not None:
+                timestamp = self._latest_tool_diagnostic_at.strftime("%Y-%m-%d %H:%M")
+                self.tool_action_label.setText(
+                    f"최근 도구 진단 결과가 저장되어 있습니다 · {timestamp}"
+                )
+            else:
+                self.tool_action_label.setText("최근 도구 진단 결과가 저장되어 있습니다.")
+        else:
+            self.tool_action_label.setText(
+                "아직 상세 진단 결과가 없습니다. '최신 상태로 맞추기'를 실행하면 결과가 저장됩니다."
+            )
+        if hasattr(self, "tool_diagnostic_view_button"):
+            self.tool_diagnostic_view_button.setEnabled(has_report)
+        if hasattr(self, "tool_diagnostic_export_button"):
+            self.tool_diagnostic_export_button.setEnabled(has_report)
+
+    def _show_tool_diagnostic_report(self) -> None:
+        report = self._latest_tool_diagnostic_report.strip()
+        if not report:
+            show_warm_message(
+                self,
+                "도구 진단 결과",
+                "아직 저장된 도구 진단 결과가 없습니다.",
+            )
+            return
+        show_warm_report(
+            self,
+            "도구 진단 결과",
+            report,
+            message="문제가 있을 때 이 화면을 캡처하거나 TXT 파일을 함께 보내 주세요.",
+        )
+
+    def _export_tool_diagnostic_report(self) -> None:
+        report = self._latest_tool_diagnostic_report.strip()
+        if not report:
+            show_warm_message(
+                self,
+                "TXT로 내보내기",
+                "아직 저장된 도구 진단 결과가 없습니다.",
+            )
+            return
+
+        when = self._latest_tool_diagnostic_at or datetime.now()
+        filename = f"RR-V_Tool_Diagnostics_{when.strftime('%Y%m%d_%H%M%S')}.txt"
+        destination, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "도구 진단 결과 저장",
+            str(Path.home() / filename),
+            "텍스트 파일 (*.txt)",
+        )
+        if not destination:
+            return
+
+        target = Path(destination)
+        if target.suffix.lower() != ".txt":
+            target = target.with_suffix(".txt")
+        try:
+            target.write_text(report, encoding="utf-8-sig")
+        except OSError as error:
+            show_warm_message(
+                self,
+                "내보내기 실패",
+                f"TXT 파일을 저장하지 못했습니다.\n\n{error}",
+            )
+            return
+
+        previous_text = self.tool_action_label.text()
+        self.tool_action_label.setText(f"✓ TXT 저장 완료 · {target.name}")
+
+        def restore_status() -> None:
+            if self.tool_action_label.text().startswith("✓ TXT 저장 완료"):
+                self.tool_action_label.setText(previous_text)
+
+        QTimer.singleShot(3200, restore_status)
 
     def _state_colors(self, state: str) -> tuple[str, str]:
         dark = active_theme_mode() == THEME_DARK
@@ -634,9 +794,24 @@ class ThemeSettingsPage(SettingsPage):
     def _tool_action_done(self, ok: bool, message: str) -> None:
         if hasattr(self, "component_check_button"):
             self.component_check_button.setEnabled(True)
+
+        completed_at = datetime.now()
+        report = self._build_tool_diagnostic_report(message, completed_at)
+        self._store_latest_tool_diagnostic_report(report, completed_at)
+        if hasattr(self, "tool_diagnostic_view_button"):
+            self.tool_diagnostic_view_button.setEnabled(True)
+        if hasattr(self, "tool_diagnostic_export_button"):
+            self.tool_diagnostic_export_button.setEnabled(True)
         if hasattr(self, "tool_action_label"):
-            prefix = "✓ 완료\n" if ok else "⚠ 일부 작업 실패\n"
-            self.tool_action_label.setText(prefix + message)
+            if ok:
+                self.tool_action_label.setText(
+                    "✓ 도구 확인이 완료되었습니다. 상세 결과를 보거나 TXT로 내보낼 수 있습니다."
+                )
+            else:
+                self.tool_action_label.setText(
+                    "⚠ 일부 도구 작업에 문제가 있었습니다. 상세 결과의 진단 코드를 확인해 주세요."
+                )
+
         self._refresh_tool_status()
         self.start_component_update_check(force=True, notify=False)
 
