@@ -83,6 +83,12 @@ class UnifiedSettingsPage(CommunitySettingsPage):
             self.general_save_status.hide()
         return card
 
+    def _set_tool_action_status(self, text: str) -> None:
+        # Community Beta의 도구 탭 구성이 바뀌는 동안에도 백그라운드 진행
+        # 신호가 UI 위젯 누락 때문에 예외를 만들지 않도록 방어한다.
+        if hasattr(self, "tool_action_label"):
+            self.tool_action_label.setText(text)
+
     def _save_general_tab_changes(self) -> None:
         requested_start_with_windows = self.start_with_windows_checkbox.isChecked()
 
