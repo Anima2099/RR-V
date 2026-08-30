@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 import threading
-import time
 
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
@@ -43,8 +42,6 @@ GITHUB_PROFILE_URL = "https://github.com/Anima2099"
 BUY_ME_A_COFFEE_URL = "https://buymeacoffee.com/anima2099"
 DEVELOPER_EMAIL = "anima2099@proton.me"
 _UPDATE_CHANNEL_SETTING_KEY = "updates/channel"
-_LAST_AUTO_UPDATE_CHECK_KEY = "updates/last_auto_check_epoch"
-_AUTO_UPDATE_CHECK_INTERVAL_SECONDS = 24 * 60 * 60
 
 
 class AboutPage(QWidget):
@@ -357,19 +354,6 @@ class AboutPage(QWidget):
     def start_auto_update_check(self, *, notify: bool = True) -> None:
         if self._update_check_running or self._installer_download_running:
             return
-
-        now = time.time()
-        try:
-            last_check = float(
-                self._settings.value(_LAST_AUTO_UPDATE_CHECK_KEY, 0) or 0
-            )
-        except (TypeError, ValueError):
-            last_check = 0.0
-        if now - last_check < _AUTO_UPDATE_CHECK_INTERVAL_SECONDS:
-            return
-
-        self._settings.setValue(_LAST_AUTO_UPDATE_CHECK_KEY, now)
-        self._settings.sync()
         self._begin_update_check(notify=notify)
 
     def _begin_update_check(self, *, notify: bool) -> None:
