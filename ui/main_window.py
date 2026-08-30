@@ -163,7 +163,7 @@ class MainWindow(QMainWindow):
             if installer is not None:
                 detail = (
                     message
-                    + "\n\nInstaller를 다운로드하고 SHA-256 검증을 통과하면 설치 프로그램을 실행합니다."
+                    + "\n\n인스톨러를 다운로드하고 필수 검증을 완료한 뒤\n자동으로 RR-V를 종료하고 설치 프로그램을 실행합니다."
                 )
                 yes_text = "업데이트"
             else:
