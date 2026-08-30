@@ -59,6 +59,7 @@ class ThemeSettingsPage(SettingsPage):
         self._last_component_result: ComponentUpdateCheckResult | None = None
         self._tools_tab_checked_once = False
         self._missing_runtime_keys: set[str] = set()
+        self._repair_runtime_keys: set[str] = set()
         self.component_check_finished.connect(self._component_check_done)
 
         self.settings_stack.addWidget(self._create_about_tab())
@@ -358,22 +359,56 @@ class ThemeSettingsPage(SettingsPage):
         if version_label is not None:
             version_label.setStyleSheet(style if state == "update" else "")
 
+    @staticmethod
+    def _status_issue_kind(status: object | None) -> str:
+        if status is None:
+            return "repair"
+        if bool(getattr(status, "available", False)):
+            return "normal"
+        version = str(getattr(status, "version", "") or "").strip().casefold()
+        return "missing" if version in {"없음", "none"} else "repair"
+
+    def _runtime_issue_message(self) -> str:
+        missing_count = len(self._missing_runtime_keys)
+        repair_count = len(self._repair_runtime_keys)
+        if missing_count and repair_count:
+            return (
+                f"설치가 필요한 구성요소 {missing_count}개와 복구가 필요한 구성요소 "
+                f"{repair_count}개가 있습니다."
+            )
+        if missing_count:
+            return f"설치가 필요한 구성요소 {missing_count}개가 있습니다."
+        if repair_count:
+            return f"문제가 감지된 구성요소 {repair_count}개가 있습니다. 복구를 진행해 주세요."
+        return ""
+
     def _refresh_tool_status(self) -> None:
         if not hasattr(self, "tool_status_labels"):
             return
         statuses = {status.key: status for status in inspect_tools()}
         missing: set[str] = set()
+        repair: set[str] = set()
 
-        ytdlp = statuses.get("ytdlp")
-        if ytdlp is not None:
-            self.tool_version_labels["ytdlp"].setText(ytdlp.version)
-            self._set_tool_visual(
-                "ytdlp",
-                "normal" if ytdlp.available else "error",
-                "✓ 정상" if ytdlp.available else "✕ 없음",
-            )
-            if not ytdlp.available:
-                missing.add("ytdlp")
+        def apply_single(key: str, status: object | None) -> None:
+            if status is None:
+                self.tool_version_labels[key].setText("확인 불가")
+                self._set_tool_visual(key, "error", "? 확인 실패")
+                repair.add(key)
+                return
+
+            version = str(getattr(status, "version", "") or "확인 불가")
+            self.tool_version_labels[key].setText(version)
+            issue_kind = self._status_issue_kind(status)
+            if issue_kind == "normal":
+                self._set_tool_visual(key, "normal", "✓ 정상")
+            elif issue_kind == "missing":
+                self._set_tool_visual(key, "error", "✕ 설치 필요")
+                missing.add(key)
+            else:
+                self._set_tool_visual(key, "error", "⚠ 복구 필요")
+                repair.add(key)
+
+        apply_single("ytdlp", statuses.get("ytdlp"))
 
         ffmpeg = statuses.get("ffmpeg")
         ffprobe = statuses.get("ffprobe")
@@ -388,41 +423,40 @@ class ThemeSettingsPage(SettingsPage):
             self.tool_version_labels["ffmpeg"].setText(version_text)
             self._set_tool_visual("ffmpeg", "normal", "✓ 정상")
         else:
-            self.tool_version_labels["ffmpeg"].setText("없음")
-            self._set_tool_visual("ffmpeg", "error", "✕ 없음")
-            missing.add("ffmpeg")
+            ffmpeg_kind = self._status_issue_kind(ffmpeg)
+            ffprobe_kind = self._status_issue_kind(ffprobe)
+            both_missing = ffmpeg_kind == "missing" and ffprobe_kind == "missing"
+            if both_missing:
+                self.tool_version_labels["ffmpeg"].setText("없음")
+                self._set_tool_visual("ffmpeg", "error", "✕ 설치 필요")
+                missing.add("ffmpeg")
+            else:
+                ffmpeg_text = str(getattr(ffmpeg, "version", "확인 불가") or "확인 불가")
+                ffprobe_text = str(getattr(ffprobe, "version", "확인 불가") or "확인 불가")
+                self.tool_version_labels["ffmpeg"].setText(
+                    f"ffmpeg {ffmpeg_text} / ffprobe {ffprobe_text}"
+                )
+                self._set_tool_visual("ffmpeg", "error", "⚠ 복구 필요")
+                repair.add("ffmpeg")
 
-        deno = statuses.get("deno")
-        if deno is not None:
-            self.tool_version_labels["deno"].setText(deno.version)
-            self._set_tool_visual(
-                "deno",
-                "normal" if deno.available else "error",
-                "✓ 정상" if deno.available else "✕ 없음",
-            )
-            if not deno.available:
-                missing.add("deno")
-
-        pot = statuses.get("pot")
-        if pot is not None:
-            self.tool_version_labels["pot"].setText(pot.version)
-            self._set_tool_visual(
-                "pot",
-                "normal" if pot.available else "error",
-                "✓ 정상" if pot.available else "✕ 없음",
-            )
+        apply_single("deno", statuses.get("deno"))
+        apply_single("pot", statuses.get("pot"))
 
         self._missing_runtime_keys = missing
-        if missing:
+        self._repair_runtime_keys = repair
+        if missing and repair:
+            self.latest_update_button.setText("설치 및 복구")
+        elif missing:
             self.latest_update_button.setText("필수 구성요소 설치")
-            self.latest_update_button.setEnabled(True)
-            if not getattr(self, "_component_check_running", False):
-                self.component_update_status.setText(
-                    f"필수 실행 도구 {len(missing)}개가 필요합니다. 설치 버튼을 눌러 준비해 주세요."
-                )
+        elif repair:
+            self.latest_update_button.setText("구성요소 복구")
         else:
             self.latest_update_button.setText("최신 상태로 맞추기")
-            self.latest_update_button.setEnabled(True)
+        self.latest_update_button.setEnabled(True)
+
+        issue_message = self._runtime_issue_message()
+        if issue_message and not getattr(self, "_component_check_running", False):
+            self.component_update_status.setText(issue_message)
 
     def start_component_update_check(
         self,
@@ -456,11 +490,10 @@ class ThemeSettingsPage(SettingsPage):
         if hasattr(self, "component_check_button"):
             self.component_check_button.setEnabled(True)
 
+        issue_message = self._runtime_issue_message()
         if result.skipped:
-            if self._missing_runtime_keys:
-                self.component_update_status.setText(
-                    f"필수 실행 도구 {len(self._missing_runtime_keys)}개가 필요합니다. 설치 버튼을 눌러 준비해 주세요."
-                )
+            if issue_message:
+                self.component_update_status.setText(issue_message)
             else:
                 self.component_update_status.setText(
                     "✓ 오늘 이미 자동 확인했습니다. 도구가 바뀌면 다음 실행에서 다시 확인합니다."
@@ -468,9 +501,9 @@ class ThemeSettingsPage(SettingsPage):
             return
 
         if not result.components:
-            if self._missing_runtime_keys:
+            if issue_message:
                 self.component_update_status.setText(
-                    "필수 도구가 없고 업데이트 서버도 확인하지 못했습니다. 인터넷 연결을 확인해 주세요."
+                    issue_message + " 업데이트 서버 확인도 실패했습니다. 인터넷 연결을 확인해 주세요."
                 )
             else:
                 self.component_update_status.setText(
@@ -482,23 +515,22 @@ class ThemeSettingsPage(SettingsPage):
             if component.key not in self.tool_status_labels:
                 continue
             if component.update_available is None:
-                self._set_tool_visual(component.key, "error", "확인 실패")
+                self._set_tool_visual(component.key, "error", "? 확인 실패")
             elif component.update_available:
                 installing = component.current.strip().lower() in {"없음", "none"}
                 self._set_tool_visual(
                     component.key,
                     "update",
-                    "● 설치 필요" if installing else "● 업데이트 가능",
+                    "✕ 설치 필요" if installing else "↑ 업데이트 가능",
                 )
             else:
                 self._set_tool_visual(component.key, "normal", "✓ 최신")
 
         updates = result.updates
         failed_count = len(result.errors)
-        if self._missing_runtime_keys:
-            self.component_update_status.setText(
-                f"필수 실행 도구 {len(self._missing_runtime_keys)}개가 필요합니다. 공식 배포처에서 자동으로 설치할 수 있습니다."
-            )
+        issue_message = self._runtime_issue_message()
+        if issue_message:
+            self.component_update_status.setText(issue_message)
         elif updates:
             self.component_update_status.setText(
                 f"업데이트 {len(updates)}개가 있습니다. '최신 상태로 맞추기'에서 함께 정리할 수 있습니다."
@@ -549,19 +581,31 @@ class ThemeSettingsPage(SettingsPage):
 
     def _start_latest_updates(self) -> None:
         installing = bool(self._missing_runtime_keys)
-        if installing:
+        repairing = bool(self._repair_runtime_keys)
+        if installing or repairing:
             detail = [
-                "RR-V에 필요한 외부 실행 도구를 각 공식 배포처에서 내려받습니다.",
-                "yt-dlp Nightly, FFmpeg / FFprobe, Deno를 준비하며 다운로드 용량은 버전에 따라 달라질 수 있습니다.",
-                "인터넷 연결이 필요합니다.",
+                "RR-V가 필요한 구성요소의 설치 상태와 손상 여부를 확인합니다.",
+                "외부 실행 도구는 공식 배포처에서 준비하고, YouTube 인증 런타임은 RR-V 검증본으로 복구합니다.",
+                "yt-dlp Nightly, FFmpeg / FFprobe, Deno, YouTube 인증 런타임을 함께 확인합니다.",
+                "인터넷 연결이 필요할 수 있습니다.",
             ]
-            title = "필수 구성요소 설치"
-            yes_text = "설치 시작"
-            status_text = "필수 구성요소 설치 준비 중…"
+            if installing and repairing:
+                title = "구성요소 설치 및 복구"
+                yes_text = "설치 및 복구 시작"
+                status_text = "구성요소 설치 및 복구 준비 중…"
+            elif installing:
+                title = "필수 구성요소 설치"
+                yes_text = "설치 시작"
+                status_text = "필수 구성요소 설치 준비 중…"
+            else:
+                title = "구성요소 복구"
+                yes_text = "복구 시작"
+                status_text = "구성요소 복구 준비 중…"
         else:
             detail = [
                 "yt-dlp Nightly, FFmpeg / FFprobe, Deno를 공식 배포처 기준 최신 상태로 맞춥니다.",
-                "이미 최신인 도구는 다시 다운로드하지 않습니다.",
+                "YouTube 인증 런타임의 무결성도 함께 확인하며, 문제가 있을 때만 RR-V 검증본으로 복구합니다.",
+                "이미 최신이고 정상인 구성요소는 다시 다운로드하지 않습니다.",
                 "다운로드나 미디어 작업 중이라면 먼저 작업을 끝내는 것을 권장합니다.",
             ]
             title = "도구 최신 상태로 맞추기"
