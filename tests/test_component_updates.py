@@ -1,8 +1,22 @@
 from __future__ import annotations
 
+import sys
+from types import ModuleType
 import unittest
 
-from app.component_updates import (
+
+# component_updates의 순수 버전 처리 로직만 검사한다.
+# RR-V GUI 런타임(PySide6)이나 실제 외부 도구 설치 여부가 테스트 실행 환경에
+# 영향을 주지 않도록, import 시 필요한 두 모듈만 가벼운 테스트 대역으로 둔다.
+_settings_store_stub = ModuleType("app.settings_store")
+_settings_store_stub.get_settings = lambda: None
+sys.modules["app.settings_store"] = _settings_store_stub
+
+_tool_manager_stub = ModuleType("app.tool_manager")
+_tool_manager_stub.inspect_tools = lambda: ()
+sys.modules["app.tool_manager"] = _tool_manager_stub
+
+from app.component_updates import (  # noqa: E402
     _local_signature,
     _normalize_ytdlp_version,
     _release_tuple,
