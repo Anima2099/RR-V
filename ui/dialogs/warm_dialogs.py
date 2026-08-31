@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.theme import THEME_DARK, active_theme_mode
+
 
 class _WarmBaseDialog(QDialog):
     def __init__(
@@ -198,6 +200,30 @@ class WarmReportDialog(_WarmBaseDialog):
         report_view.setReadOnly(True)
         report_view.setPlainText(report)
         report_view.setMinimumHeight(360)
+        if active_theme_mode() == THEME_DARK:
+            report_view.setStyleSheet(
+                "QPlainTextEdit#diagnosticReportView {"
+                "background-color: #252D29;"
+                "color: #E2E7E3;"
+                "border: 1px solid #46514B;"
+                "border-radius: 8px;"
+                "padding: 8px;"
+                "selection-background-color: #7EA2B3;"
+                "selection-color: #202723;"
+                "}"
+            )
+        else:
+            report_view.setStyleSheet(
+                "QPlainTextEdit#diagnosticReportView {"
+                "background-color: #FCF9F1;"
+                "color: #34413C;"
+                "border: 1px solid #C5C4BD;"
+                "border-radius: 8px;"
+                "padding: 8px;"
+                "selection-background-color: #608598;"
+                "selection-color: #FFFDF8;"
+                "}"
+            )
         self.root_layout.addWidget(report_view, 1)
 
         row = self._button_row()
