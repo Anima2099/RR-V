@@ -130,7 +130,7 @@ class SourceSyntaxTests(unittest.TestCase):
         self.assertIsInstance(alias.value, ast.Name)
         self.assertEqual(alias.value.id, "SettingsPage")
 
-    def test_media_tools_page_registers_detailed_media_info_tab(self) -> None:
+    def test_media_tools_page_registers_remux_without_detailed_info_tab(self) -> None:
         path = ROOT / "ui" / "pages" / "media_tools_page.py"
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         string_constants = {
@@ -143,8 +143,10 @@ class SourceSyntaxTests(unittest.TestCase):
             for node in ast.walk(tree)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
         }
-        self.assertIn("상세 정보", string_constants)
-        self.assertIn("MediaInfoPage", called_names)
+        self.assertIn("Remux", string_constants)
+        self.assertIn("RemuxPage", called_names)
+        self.assertNotIn("상세 정보", string_constants)
+        self.assertNotIn("MediaInfoPage", called_names)
 
 
 if __name__ == "__main__":
