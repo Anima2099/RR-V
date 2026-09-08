@@ -5,9 +5,14 @@ import json
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
-from app.settings_store import get_settings
 
+from app.settings_store import get_settings
 from app.paths import APPDATA_DIR, RRV_DATA_DIR
+from core.filename_template import (
+    DEFAULT_FILENAME_TEMPLATE,
+    normalize_filename_template,
+    validate_filename_template,
+)
 
 
 FILE_COLLISION_NUMBERED = "numbered"
@@ -16,6 +21,7 @@ FILE_COLLISION_MODES = {
     FILE_COLLISION_NUMBERED,
     FILE_COLLISION_OVERWRITE,
 }
+
 
 @dataclass(slots=True)
 class GeneralPreferences:
@@ -29,6 +35,7 @@ class GeneralPreferences:
     minimize_to_tray_on_close: bool = False
     start_with_windows: bool = False
     file_collision_mode: str = FILE_COLLISION_NUMBERED
+    filename_template: str = DEFAULT_FILENAME_TEMPLATE
 
 
 def _settings() -> QSettings:
@@ -99,6 +106,16 @@ def load_general_preferences() -> GeneralPreferences:
     if collision_mode not in FILE_COLLISION_MODES:
         collision_mode = FILE_COLLISION_NUMBERED
 
+    filename_template = normalize_filename_template(
+        settings.value(
+            "general/filename_template",
+            DEFAULT_FILENAME_TEMPLATE,
+        )
+    )
+    valid_template, _template_error = validate_filename_template(filename_template)
+    if not valid_template:
+        filename_template = DEFAULT_FILENAME_TEMPLATE
+
     return GeneralPreferences(
         default_download_folder=default_folder,
         cookie_folder=cookie_folder,
@@ -138,6 +155,7 @@ def load_general_preferences() -> GeneralPreferences:
             False,
         ),
         file_collision_mode=collision_mode,
+        filename_template=filename_template,
     )
 
 
@@ -183,6 +201,15 @@ def save_general_preferences(preferences: GeneralPreferences) -> None:
     settings.setValue(
         "general/file_collision_mode",
         collision_mode,
+    )
+
+    filename_template = normalize_filename_template(preferences.filename_template)
+    valid_template, _template_error = validate_filename_template(filename_template)
+    if not valid_template:
+        filename_template = DEFAULT_FILENAME_TEMPLATE
+    settings.setValue(
+        "general/filename_template",
+        filename_template,
     )
     settings.sync()
 
