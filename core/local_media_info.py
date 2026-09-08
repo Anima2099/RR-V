@@ -200,7 +200,7 @@ class MediaFileInfo:
         for track in self.video_tracks:
             if not track.is_attached_picture:
                 return track
-        return self.video_tracks[0] if self.video_tracks else None
+        return None
 
     @property
     def has_video(self) -> bool:

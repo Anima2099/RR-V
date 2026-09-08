@@ -149,6 +149,33 @@ class MediaProbeParserTests(unittest.TestCase):
         self.assertEqual(info.primary_video.index if info.primary_video else None, 1)
         self.assertTrue(info.has_video)
 
+    def test_cover_art_only_does_not_count_as_primary_video(self) -> None:
+        payload = {
+            "streams": [
+                {
+                    "index": 0,
+                    "codec_type": "video",
+                    "codec_name": "mjpeg",
+                    "width": 800,
+                    "height": 800,
+                    "disposition": {"attached_pic": 1},
+                },
+                {
+                    "index": 1,
+                    "codec_type": "audio",
+                    "codec_name": "flac",
+                    "channels": 2,
+                    "disposition": {"default": 1},
+                },
+            ]
+        }
+
+        info = parse_media_probe_payload("album.flac", payload, file_size_bytes=100)
+        self.assertEqual(len(info.video_tracks), 1)
+        self.assertIsNone(info.primary_video)
+        self.assertFalse(info.has_video)
+        self.assertTrue(info.has_audio)
+
     def test_audio_only_and_missing_numeric_values_are_safe(self) -> None:
         payload = {
             "format": {

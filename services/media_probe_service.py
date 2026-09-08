@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import threading
+from time import monotonic
 from typing import Any
 
 from app.paths import find_executable
@@ -90,11 +91,18 @@ class MediaProbeService:
         with self._process_lock:
             self._process = process
 
+        started_at = monotonic()
         try:
             while True:
                 if is_cancelled is not None and is_cancelled():
                     self.cancel()
                     raise MediaProbeCancelledError("미디어 정보 확인 취소됨")
+                if monotonic() - started_at > 30.0:
+                    self.cancel()
+                    raise MediaProbeError(
+                        "미디어 정보 확인 시간이 너무 오래 걸렸습니다.",
+                        "FFprobe가 30초 안에 응답하지 않았습니다.",
+                    )
                 try:
                     stdout, stderr = process.communicate(timeout=0.2)
                     break
