@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.tools.converter_page import ConverterPage
-from ui.tools.remux_page import RemuxPage
+from ui.tools.remux_page_refined import RemuxPage
 from ui.tools.snapshot_page import SnapshotPage
 from ui.tools.subtitle_page import SubtitlePage
 from ui.tools.thumbnail_page import ThumbnailPage
