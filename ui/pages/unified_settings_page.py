@@ -3,20 +3,21 @@ from __future__ import annotations
 from datetime import datetime
 import inspect
 
-from PySide6.QtCore import QTimer, Signal
-from PySide6.QtWidgets import QFrame, QLabel, QPushButton
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QFrame, QLabel
 
 from app.component_updates import ComponentUpdateCheckResult
 from ui.pages.community_settings_page import CommunitySettingsPage as _CommunityLayer
-from ui.pages.settings_page import SettingsPage
+from ui.pages.settings_page import SettingsPage as _BaseSettingsPage
 from ui.pages.theme_settings_page import ThemeSettingsPage as _ThemeLayer
 
 
-class UnifiedSettingsPage(SettingsPage):
-    """1.4 개발용 최종 설정 화면.
+class SettingsPage(_BaseSettingsPage):
+    """RR-V 1.4의 최종 설정 화면 진입점.
 
-    버전별 SettingsPage 상속을 실행 경로에서 제거하고, 검증된 Theme/Community
-    구현을 직접 재사용한다. DEV1-4에서 이 브리지까지 SettingsPage로 흡수한다.
+    과거 버전별 SettingsPage 상속 사슬은 실행 경로에서 제거하고, 이미 검증된
+    Theme/Community 구현은 내부 구현 공급자로만 재사용한다. 외부에서는 이
+    SettingsPage 하나만 사용한다.
     """
 
     component_check_finished = Signal(object, bool)
@@ -34,7 +35,7 @@ class UnifiedSettingsPage(SettingsPage):
         self._latest_tool_diagnostic_at: datetime | None = None
         self._load_latest_tool_diagnostic_report()
 
-        SettingsPage.__init__(self)
+        _BaseSettingsPage.__init__(self)
         self.component_check_finished.connect(self._component_check_done)
         self._refresh_tool_diagnostic_card()
 
@@ -66,35 +67,35 @@ class UnifiedSettingsPage(SettingsPage):
         return card
 
     def _create_windows_behavior_card(self) -> QFrame:
-        card = SettingsPage._create_windows_behavior_card(self)
+        card = _BaseSettingsPage._create_windows_behavior_card(self)
         self._hide_card_button(card, "Windows 설정 저장")
         if hasattr(self, "system_save_status"):
             self.system_save_status.hide()
         return card
 
     def _create_notification_card(self) -> QFrame:
-        card = SettingsPage._create_notification_card(self)
+        card = _BaseSettingsPage._create_notification_card(self)
         self._hide_card_button(card, "일반 설정 저장")
         if hasattr(self, "general_save_status"):
             self.general_save_status.hide()
         return card
 
     def _restore_from_backup(self) -> None:
-        SettingsPage._restore_from_backup(self)
+        _BaseSettingsPage._restore_from_backup(self)
         self._reload_theme_preferences_to_controls()
 
     def _reset_selected_scope(self) -> None:
-        SettingsPage._reset_selected_scope(self)
+        _BaseSettingsPage._reset_selected_scope(self)
         self._reload_theme_preferences_to_controls()
 
 
 def _copy_methods(source: type, *, excluded: set[str]) -> None:
-    """super() 의존성이 없는 검증된 메서드만 최종 클래스에 복사한다."""
+    """super() 의존성이 없는 검증된 메서드만 최종 SettingsPage에 복사한다."""
     for name, value in source.__dict__.items():
         if name in excluded or name.startswith("__"):
             continue
         if inspect.isfunction(value) or isinstance(value, (staticmethod, classmethod)):
-            setattr(UnifiedSettingsPage, name, value)
+            setattr(SettingsPage, name, value)
 
 
 _copy_methods(
@@ -120,3 +121,8 @@ _copy_methods(
         "_create_notification_card",
     },
 )
+
+# 구버전 내부 import 호환. MainWindow의 기존 import도 동일한 최종 SettingsPage를 받는다.
+UnifiedSettingsPage = SettingsPage
+
+__all__ = ["SettingsPage", "UnifiedSettingsPage"]
