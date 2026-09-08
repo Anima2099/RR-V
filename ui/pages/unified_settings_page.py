@@ -24,7 +24,28 @@ class UnifiedSettingsPage(CommunitySettingsPage):
         # 백그라운드 구성요소 확인 결과를 재사용한다.
         self._initializing_settings_page = True
         super().__init__()
+        self._remove_legacy_about_tab()
         self._initializing_settings_page = False
+
+    def _remove_legacy_about_tab(self) -> None:
+        """사이드바의 독립 정보 페이지로 대체된 예전 설정 내부 정보 탭을 제거한다."""
+        about_index = int(getattr(self, "ABOUT_TAB", -1))
+        if about_index < 0:
+            return
+
+        if hasattr(self, "settings_stack") and about_index < self.settings_stack.count():
+            about_page = self.settings_stack.widget(about_index)
+            self.settings_stack.removeWidget(about_page)
+            if about_page is not None:
+                about_page.deleteLater()
+
+        if hasattr(self, "tab_button_group"):
+            about_button = self.tab_button_group.button(about_index)
+            if about_button is not None:
+                self.tab_button_group.removeButton(about_button)
+                if hasattr(self, "tab_buttons") and about_button in self.tab_buttons:
+                    self.tab_buttons.remove(about_button)
+                about_button.deleteLater()
 
     def _refresh_tool_status(self) -> None:
         if getattr(self, "_initializing_settings_page", False):
