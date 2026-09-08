@@ -32,10 +32,24 @@ class RemuxPage(_BaseRemuxPage):
     def __init__(self) -> None:
         self._updating_targets = False
         super().__init__()
-        self.input_summary.setMinimumHeight(42)
+
+        outer_layout = self.layout()
+        if outer_layout is not None:
+            outer_layout.setContentsMargins(24, 14, 24, 14)
+            outer_layout.setSpacing(10)
+
+        drop_layout = self.drop_area.layout()
+        if drop_layout is not None:
+            drop_layout.setContentsMargins(14, 8, 14, 8)
+            drop_layout.setSpacing(6)
+
+        self.input_summary.setWordWrap(False)
+        self.input_summary.setMinimumHeight(24)
 
     def _create_target_card(self) -> QFrame:
         card, layout = create_card()
+        layout.setContentsMargins(20, 14, 20, 14)
+        layout.setSpacing(9)
 
         heading = QLabel("출력 컨테이너")
         heading.setObjectName("settingsGroupTitle")
@@ -59,9 +73,7 @@ class RemuxPage(_BaseRemuxPage):
         target_row.addStretch()
         layout.addLayout(target_row)
 
-        description = QLabel(
-            "모든 트랙을 그대로 보존할 수 있는 컨테이너만 선택할 수 있습니다."
-        )
+        description = QLabel("보존 가능한 컨테이너만 선택할 수 있습니다.")
         description.setObjectName("mutedText")
         description.setWordWrap(True)
         layout.addWidget(description)
@@ -69,12 +81,12 @@ class RemuxPage(_BaseRemuxPage):
         self.compatibility_label = QLabel("파일을 선택하면 호환성을 확인합니다.")
         self.compatibility_label.setObjectName("remuxCompatibilityStatus")
         self.compatibility_label.setWordWrap(True)
-        self.compatibility_label.setMinimumHeight(50)
+        self.compatibility_label.setMinimumHeight(38)
         layout.addWidget(self.compatibility_label)
 
         self.output_label = QLabel("출력 파일: 확인 전")
         self.output_label.setObjectName("mutedText")
-        self.output_label.setWordWrap(True)
+        self.output_label.setWordWrap(False)
         self.output_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
@@ -143,6 +155,7 @@ class RemuxPage(_BaseRemuxPage):
                 "파일을 선택하면 호환성을 확인합니다.", "neutral"
             )
             self.output_label.setText("출력 파일: 확인 전")
+            self.output_label.setToolTip("")
             self.start_button.setEnabled(False)
             return
 
@@ -168,6 +181,7 @@ class RemuxPage(_BaseRemuxPage):
                 "error",
             )
             self.output_label.setText("출력 파일: 생성할 수 없음")
+            self.output_label.setToolTip("")
             self.start_button.setEnabled(False)
             return
 
@@ -183,17 +197,18 @@ class RemuxPage(_BaseRemuxPage):
                 "error",
             )
             self.output_label.setText("출력 파일: 생성할 수 없음")
+            self.output_label.setToolTip("")
             self.start_button.setEnabled(False)
             return
 
-        compatibility = assessments[current]
         label = REMUX_TARGET_LABELS[current]
         self._set_compatibility_status(
-            f"✓ 사용 가능 · {label}\n{compatibility.summary}",
+            f"✓ 사용 가능 · {label} · 모든 트랙을 그대로 보존합니다.",
             "success",
         )
         output_path = self._service.suggested_output_path(media_info, current)
-        self.output_label.setText(f"출력 파일: {output_path}")
+        self.output_label.setText(f"출력 파일: {Path(output_path).name}")
+        self.output_label.setToolTip(str(output_path))
         self.start_button.setEnabled(not busy)
 
     @staticmethod
@@ -248,31 +263,34 @@ class RemuxPage(_BaseRemuxPage):
 
     def _set_compatibility_status(self, text: str, state: str) -> None:
         self.compatibility_label.setText(text)
+        line_count = max(1, text.count("\n") + 1)
+        self.compatibility_label.setMinimumHeight(54 if line_count > 1 else 38)
+
         if state == "success":
             if active_theme_mode() == THEME_DARK:
                 style = (
                     "QLabel { background-color: #2E4032; color: #AFD0AD; "
                     "border: 1px solid #48604B; border-radius: 8px; "
-                    "padding: 8px 10px; font-weight: 700; }"
+                    "padding: 6px 10px; font-weight: 700; }"
                 )
             else:
                 style = (
                     "QLabel { background-color: #DDEADB; color: #557955; "
                     "border: 1px solid #C5D9C1; border-radius: 8px; "
-                    "padding: 8px 10px; font-weight: 700; }"
+                    "padding: 6px 10px; font-weight: 700; }"
                 )
         elif state == "error":
             if active_theme_mode() == THEME_DARK:
                 style = (
                     "QLabel { background-color: #452F2F; color: #E0A19A; "
                     "border: 1px solid #664343; border-radius: 8px; "
-                    "padding: 8px 10px; font-weight: 700; }"
+                    "padding: 6px 10px; font-weight: 700; }"
                 )
             else:
                 style = (
                     "QLabel { background-color: #EBDDD9; color: #985E55; "
                     "border: 1px solid #D9C2BC; border-radius: 8px; "
-                    "padding: 8px 10px; font-weight: 700; }"
+                    "padding: 6px 10px; font-weight: 700; }"
                 )
         else:
             style = ""
@@ -295,6 +313,7 @@ class RemuxPage(_BaseRemuxPage):
             "다음 파일을 선택하면 호환성을 다시 확인합니다.", "neutral"
         )
         self.output_label.setText("출력 파일: 새 파일을 선택해 주세요.")
+        self.output_label.setToolTip("")
         self.start_button.setEnabled(False)
 
     @staticmethod
@@ -305,10 +324,11 @@ class RemuxPage(_BaseRemuxPage):
             return f"{suffix} · 오디오 전용 파일"
 
         container = Path(media_info.file_name).suffix.lstrip(".").upper() or "MEDIA"
-        first_line = (
-            f"{container} · {RemuxPage._codec_label(video.codec_name)} · "
-            f"{video.resolution_text}"
-        )
+        parts = [
+            container,
+            RemuxPage._codec_label(video.codec_name),
+            video.resolution_text,
+        ]
         if media_info.audio_tracks:
             audio = media_info.audio_tracks[0]
             channel_text = audio.channel_layout or (
@@ -317,13 +337,11 @@ class RemuxPage(_BaseRemuxPage):
             audio_text = RemuxPage._codec_label(audio.codec_name)
             if channel_text:
                 audio_text += f" {channel_text}"
-            first_line += f" · {audio_text}"
+            parts.append(audio_text)
 
-        second_line = (
-            f"자막 {len(media_info.subtitle_tracks)}개 · "
-            f"챕터 {len(media_info.chapters)}개"
-        )
-        return f"{first_line}\n{second_line}"
+        parts.append(f"자막 {len(media_info.subtitle_tracks)}개")
+        parts.append(f"챕터 {len(media_info.chapters)}개")
+        return " · ".join(parts)
 
     @staticmethod
     def _codec_label(codec_name: str) -> str:
