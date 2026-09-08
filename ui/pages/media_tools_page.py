@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
 )
 
 from ui.tools.converter_page import ConverterPage
-from ui.tools.media_info_page import MediaInfoPage
 from ui.tools.snapshot_page import SnapshotPage
 from ui.tools.subtitle_page import SubtitlePage
 from ui.tools.thumbnail_page import ThumbnailPage
@@ -29,7 +28,7 @@ class MediaToolsPage(QWidget):
         title.setObjectName("pageTitle")
 
         subtitle = QLabel(
-            "다운로드한 영상을 변환하거나 썸네일, 스냅샷, 자막을 관리하고 상세 미디어 정보를 확인합니다."
+            "다운로드한 영상을 변환하거나 썸네일, 스냅샷, 자막을 관리합니다."
         )
         subtitle.setObjectName("bodyText")
 
@@ -52,7 +51,6 @@ class MediaToolsPage(QWidget):
             "썸네일",
             "스냅샷",
             "자막",
-            "상세 정보",
         ]
 
         for index, tab_name in enumerate(tab_names):
@@ -85,14 +83,12 @@ class MediaToolsPage(QWidget):
         self.tool_stack.setObjectName("toolStack")
         self.converter_page = ConverterPage()
         self.thumbnail_page = ThumbnailPage()
-        self.snapshot_page = SnapshotPage()
-        self.subtitle_page = SubtitlePage()
-        self.media_info_page = MediaInfoPage()
         self.tool_stack.addWidget(self.converter_page)
         self.tool_stack.addWidget(self.thumbnail_page)
+        self.snapshot_page = SnapshotPage()
         self.tool_stack.addWidget(self.snapshot_page)
+        self.subtitle_page = SubtitlePage()
         self.tool_stack.addWidget(self.subtitle_page)
-        self.tool_stack.addWidget(self.media_info_page)
 
         content_layout.addWidget(self.tool_stack)
         layout.addWidget(content_card, 1)
@@ -106,7 +102,6 @@ class MediaToolsPage(QWidget):
             or self.thumbnail_page.has_active_operation
             or self.snapshot_page.has_active_operation
             or self.subtitle_page.has_active_operation
-            or self.media_info_page.has_active_operation
         )
 
     def shutdown(self) -> None:
@@ -114,7 +109,6 @@ class MediaToolsPage(QWidget):
         self.thumbnail_page.shutdown()
         self.snapshot_page.shutdown()
         self.subtitle_page.shutdown()
-        self.media_info_page.shutdown()
 
     def show_tool_page(self, index: int) -> None:
         if index < 0 or index >= self.tool_stack.count():
