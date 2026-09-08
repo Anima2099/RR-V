@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.tools.converter_page import ConverterPage
+from ui.tools.remux_page import RemuxPage
 from ui.tools.snapshot_page import SnapshotPage
 from ui.tools.subtitle_page import SubtitlePage
 from ui.tools.thumbnail_page import ThumbnailPage
@@ -28,7 +29,7 @@ class MediaToolsPage(QWidget):
         title.setObjectName("pageTitle")
 
         subtitle = QLabel(
-            "다운로드한 영상을 변환하거나 썸네일, 스냅샷, 자막을 관리합니다."
+            "다운로드한 영상의 컨테이너를 바꾸거나 변환하고 썸네일, 스냅샷, 자막을 관리합니다."
         )
         subtitle.setObjectName("bodyText")
 
@@ -48,6 +49,7 @@ class MediaToolsPage(QWidget):
 
         tab_names = [
             "영상 변환",
+            "Remux",
             "썸네일",
             "스냅샷",
             "자막",
@@ -82,12 +84,14 @@ class MediaToolsPage(QWidget):
         self.tool_stack = QStackedWidget()
         self.tool_stack.setObjectName("toolStack")
         self.converter_page = ConverterPage()
+        self.remux_page = RemuxPage()
         self.thumbnail_page = ThumbnailPage()
-        self.tool_stack.addWidget(self.converter_page)
-        self.tool_stack.addWidget(self.thumbnail_page)
         self.snapshot_page = SnapshotPage()
-        self.tool_stack.addWidget(self.snapshot_page)
         self.subtitle_page = SubtitlePage()
+        self.tool_stack.addWidget(self.converter_page)
+        self.tool_stack.addWidget(self.remux_page)
+        self.tool_stack.addWidget(self.thumbnail_page)
+        self.tool_stack.addWidget(self.snapshot_page)
         self.tool_stack.addWidget(self.subtitle_page)
 
         content_layout.addWidget(self.tool_stack)
@@ -99,6 +103,7 @@ class MediaToolsPage(QWidget):
     def has_active_operation(self) -> bool:
         return (
             self.converter_page.has_active_operation
+            or self.remux_page.has_active_operation
             or self.thumbnail_page.has_active_operation
             or self.snapshot_page.has_active_operation
             or self.subtitle_page.has_active_operation
@@ -106,6 +111,7 @@ class MediaToolsPage(QWidget):
 
     def shutdown(self) -> None:
         self.converter_page.shutdown()
+        self.remux_page.shutdown()
         self.thumbnail_page.shutdown()
         self.snapshot_page.shutdown()
         self.subtitle_page.shutdown()
