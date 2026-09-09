@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui.tools.chapter_split_page import ChapterSplitPage
 from ui.tools.converter_page import ConverterPage
 from ui.tools.remux_page_refined import RemuxPage
 from ui.tools.snapshot_page import SnapshotPage
@@ -30,7 +29,7 @@ class MediaToolsPage(QWidget):
         title.setObjectName("pageTitle")
 
         subtitle = QLabel(
-            "다운로드한 영상의 컨테이너를 바꾸거나 변환하고 챕터, 썸네일, 스냅샷, 자막을 관리합니다."
+            "다운로드한 영상의 컨테이너를 바꾸거나 변환하고 썸네일, 스냅샷, 자막을 관리합니다."
         )
         subtitle.setObjectName("bodyText")
 
@@ -51,7 +50,6 @@ class MediaToolsPage(QWidget):
         tab_names = [
             "영상 변환",
             "Remux",
-            "챕터 분할",
             "썸네일",
             "스냅샷",
             "자막",
@@ -87,13 +85,11 @@ class MediaToolsPage(QWidget):
         self.tool_stack.setObjectName("toolStack")
         self.converter_page = ConverterPage()
         self.remux_page = RemuxPage()
-        self.chapter_split_page = ChapterSplitPage()
         self.thumbnail_page = ThumbnailPage()
         self.snapshot_page = SnapshotPage()
         self.subtitle_page = SubtitlePage()
         self.tool_stack.addWidget(self.converter_page)
         self.tool_stack.addWidget(self.remux_page)
-        self.tool_stack.addWidget(self.chapter_split_page)
         self.tool_stack.addWidget(self.thumbnail_page)
         self.tool_stack.addWidget(self.snapshot_page)
         self.tool_stack.addWidget(self.subtitle_page)
@@ -108,7 +104,6 @@ class MediaToolsPage(QWidget):
         return (
             self.converter_page.has_active_operation
             or self.remux_page.has_active_operation
-            or self.chapter_split_page.has_active_operation
             or self.thumbnail_page.has_active_operation
             or self.snapshot_page.has_active_operation
             or self.subtitle_page.has_active_operation
@@ -117,7 +112,6 @@ class MediaToolsPage(QWidget):
     def shutdown(self) -> None:
         self.converter_page.shutdown()
         self.remux_page.shutdown()
-        self.chapter_split_page.shutdown()
         self.thumbnail_page.shutdown()
         self.snapshot_page.shutdown()
         self.subtitle_page.shutdown()
