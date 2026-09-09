@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from functools import wraps
-from time import perf_counter
 
 from app.download_log import write_download_event
+from core.download_task import DownloadStatus
 
 
 _INSTALLED = False
@@ -19,22 +19,77 @@ def _status_snapshot(page: object) -> str:
     return ",".join(parts) or "none"
 
 
-def install_download_diagnostics() -> None:
-    """Temporarily trace the download-start path without changing behavior.
+def _button_snapshot(page: object) -> tuple[bool, str]:
+    button = getattr(page, "start_all_button", None)
+    if button is None:
+        return False, "missing"
+    return bool(button.isEnabled()), str(button.text())
 
-    These wrappers intentionally log only control-flow state. They do not alter queue
-    decisions, task values, worker lifecycle, filename rendering, or yt-dlp commands.
-    Remove this module and its main.py hook after the start-path regression is found.
+
+def install_download_diagnostics() -> None:
+    """빠른 추가의 분석->대기열 전환을 추적하고 타이밍 구멍을 막는다.
+
+    기존 DownloadPage에는 분석 중 작업을 기다리는 `_queue_waiting_for_analysis`
+    상태와 후속 대기열 진행 코드가 이미 있지만, 첫 다운로드 시작 버튼은 QUEUED
+    작업이 생긴 뒤에만 활성화되어 사용자의 시작 요청을 미리 예약할 수 없었다.
+    이 임시 진단 계층은 그 연결을 보완하면서 실제 버튼/상태 전환을 기록한다.
+
+    원인이 스모크 테스트로 확정되면 같은 동작을 본 코드에 정리하고 이 모듈은
+    제거한다.
     """
     global _INSTALLED
     if _INSTALLED:
         return
 
-    from controllers.download_controller import DownloadController
-    from services.download_service import YtDlpDownloadService as BaseDownloadService
-    from services.templated_download_service import YtDlpDownloadService as TemplatedDownloadService
     from ui.pages.download_page import DownloadPage
-    from workers.download_worker import DownloadWorker
+
+    original_refresh = DownloadPage._refresh_list_state
+
+    @wraps(original_refresh)
+    def traced_refresh(page, *args, **kwargs):  # type: ignore[no-untyped-def]
+        result = original_refresh(page, *args, **kwargs)
+
+        controller = getattr(page, "controller", None)
+        recovery_running = bool(page._recovery_running())
+        downloading = bool(getattr(controller, "is_downloading", False))
+        waiting = bool(getattr(page, "_queue_waiting_for_analysis", False))
+        queued_exists = any(
+            getattr(task, "status", None) is DownloadStatus.QUEUED
+            for task in (getattr(page, "tasks", ()) or ())
+        )
+        pending_analysis = bool(page._has_pending_analysis())
+
+        # 빠른 추가 직후에는 아직 QUEUED 작업이 없어도 사용자가 다운로드 시작을
+        # 예약할 수 있게 한다. 기존 대기열 상태 머신이 분석 완료 후 이어서 시작한다.
+        if (
+            not recovery_running
+            and not downloading
+            and not waiting
+            and pending_analysis
+            and not queued_exists
+        ):
+            page.start_all_button.setText("다운로드 시작")
+            page.start_all_button.setEnabled(True)
+            page.start_all_button.setToolTip(
+                "분석 중인 영상은 정보 확인이 끝나면 순서대로 다운로드합니다."
+            )
+
+        enabled, text = _button_snapshot(page)
+        if pending_analysis or queued_exists or waiting:
+            write_download_event(
+                "diag.queue.refresh_state",
+                button_enabled=enabled,
+                button_text=text,
+                queued=queued_exists,
+                pending_analysis=pending_analysis,
+                waiting=waiting,
+                queue_running=bool(getattr(page, "_queue_running", False)),
+                controller_downloading=downloading,
+                statuses=_status_snapshot(page),
+            )
+        return result
+
+    DownloadPage._refresh_list_state = traced_refresh
 
     original_start_first = DownloadPage._start_first_queued
 
@@ -43,13 +98,18 @@ def install_download_diagnostics() -> None:
         controller = getattr(page, "controller", None)
         tasks = getattr(page, "tasks", ()) or ()
         queued_count = sum(
-            getattr(getattr(task, "status", None), "value", "") == "queued"
+            getattr(task, "status", None) is DownloadStatus.QUEUED
             for task in tasks
         )
+        pending_analysis = bool(page._has_pending_analysis())
+        enabled, text = _button_snapshot(page)
         write_download_event(
             "diag.queue.start_first_enter",
             queued=queued_count,
             task_count=len(tasks),
+            pending_analysis=pending_analysis,
+            button_enabled=enabled,
+            button_text=text,
             queue_running=bool(getattr(page, "_queue_running", False)),
             controller_downloading=bool(
                 getattr(controller, "is_downloading", False)
@@ -57,6 +117,33 @@ def install_download_diagnostics() -> None:
             recovery_running=bool(page._recovery_running()),
             statuses=_status_snapshot(page),
         )
+
+        # 기존 코드는 QUEUED 작업이 아직 없으면 즉시 종료한다. 빠른 추가처럼
+        # 분석 중인 작업이 존재할 때는 사용자의 시작 의사를 대기열에 예약한다.
+        if (
+            not bool(getattr(controller, "is_downloading", False))
+            and not page._recovery_running()
+            and page._next_queued_task() is None
+            and pending_analysis
+        ):
+            page._queue_running = True
+            page._queue_waiting_for_analysis = True
+            page._queue_had_success = False
+            page._queue_had_failure = False
+            write_download_event(
+                "queue.started_waiting_analysis",
+                pending=sum(
+                    getattr(task, "status", None) is DownloadStatus.ANALYZING
+                    for task in tasks
+                ),
+                statuses=_status_snapshot(page),
+            )
+            page._refresh_list_state()
+            page.toast.show_message(
+                "영상 정보 확인이 끝나면 다운로드를 시작합니다."
+            )
+            return None
+
         try:
             return original_start_first(page, *args, **kwargs)
         except Exception as error:
@@ -65,196 +152,109 @@ def install_download_diagnostics() -> None:
                 error=repr(error),
             )
             raise
-        finally:
-            tasks_after = getattr(page, "tasks", ()) or ()
-            write_download_event(
-                "diag.queue.start_first_exit",
-                queue_running=bool(getattr(page, "_queue_running", False)),
-                controller_downloading=bool(
-                    getattr(controller, "is_downloading", False)
-                ),
-                statuses=_status_snapshot(page),
-                queued=sum(
-                    getattr(getattr(task, "status", None), "value", "")
-                    == "queued"
-                    for task in tasks_after
-                ),
-            )
 
     DownloadPage._start_first_queued = traced_start_first
 
-    original_start_task = DownloadPage._start_task
+    original_complete_quick = DownloadPage._complete_quick_task
 
-    @wraps(original_start_task)
-    def traced_start_task(page, task_id: str, *args, **kwargs):  # type: ignore[no-untyped-def]
-        task = page._task_by_id(task_id)
-        controller = getattr(page, "controller", None)
+    @wraps(original_complete_quick)
+    def traced_complete_quick(page, media_info, thumbnail_data):  # type: ignore[no-untyped-def]
+        task_id = str(getattr(page, "_active_quick_task_id", ""))
+        before_enabled, before_text = _button_snapshot(page)
         write_download_event(
-            "diag.queue.start_task_enter",
+            "diag.quick.complete_enter",
             task_id=task_id,
-            from_queue=bool(kwargs.get("from_queue", False)),
-            task_found=task is not None,
+            button_enabled=before_enabled,
+            button_text=before_text,
+            queue_running=bool(getattr(page, "_queue_running", False)),
+            waiting=bool(getattr(page, "_queue_waiting_for_analysis", False)),
+            statuses=_status_snapshot(page),
+        )
+        result = original_complete_quick(page, media_info, thumbnail_data)
+        task = page._task_by_id(task_id) if task_id else None
+        after_enabled, after_text = _button_snapshot(page)
+        write_download_event(
+            "diag.quick.complete_exit",
+            task_id=task_id,
             task_status=(
                 getattr(getattr(task, "status", None), "value", "missing")
                 if task is not None
                 else "missing"
             ),
-            controller_downloading=bool(
-                getattr(controller, "is_downloading", False)
-            ),
-            recovery_running=bool(page._recovery_running()),
-        )
-        try:
-            return original_start_task(page, task_id, *args, **kwargs)
-        except Exception as error:
-            write_download_event(
-                "diag.queue.start_task_exception",
-                task_id=task_id,
-                error=repr(error),
-            )
-            raise
-        finally:
-            current = page._task_by_id(task_id)
-            write_download_event(
-                "diag.queue.start_task_exit",
-                task_id=task_id,
-                task_status=(
-                    getattr(getattr(current, "status", None), "value", "missing")
-                    if current is not None
-                    else "missing"
-                ),
-                phase=(getattr(current, "phase_message", "") if current else ""),
-                process_id=(getattr(current, "process_id", 0) if current else 0),
-                controller_downloading=bool(
-                    getattr(controller, "is_downloading", False)
-                ),
-                active_task_id=str(
-                    getattr(controller, "active_download_task_id", "")
-                ),
-            )
-
-    DownloadPage._start_task = traced_start_task
-
-    original_controller_start = DownloadController.start_download
-
-    @wraps(original_controller_start)
-    def traced_controller_start(controller, task):  # type: ignore[no-untyped-def]
-        write_download_event(
-            "diag.controller.start_download_enter",
-            task_id=getattr(task, "task_id", ""),
-            is_downloading=bool(controller.is_downloading),
-            active_task_id=controller.active_download_task_id,
-        )
-        try:
-            result = original_controller_start(controller, task)
-        except Exception as error:
-            write_download_event(
-                "diag.controller.start_download_exception",
-                task_id=getattr(task, "task_id", ""),
-                error=repr(error),
-            )
-            raise
-        worker = getattr(controller, "_download_worker", None)
-        write_download_event(
-            "diag.controller.start_download_exit",
-            task_id=getattr(task, "task_id", ""),
-            result=bool(result),
-            active_task_id=controller.active_download_task_id,
-            worker_exists=worker is not None,
-            worker_running=bool(worker is not None and worker.isRunning()),
+            button_enabled=after_enabled,
+            button_text=after_text,
+            queue_running=bool(getattr(page, "_queue_running", False)),
+            waiting=bool(getattr(page, "_queue_waiting_for_analysis", False)),
+            statuses=_status_snapshot(page),
         )
         return result
 
-    DownloadController.start_download = traced_controller_start
+    DownloadPage._complete_quick_task = traced_complete_quick
 
-    original_worker_run = DownloadWorker.run
+    original_analysis_finished = DownloadPage._analysis_finished
 
-    @wraps(original_worker_run)
-    def traced_worker_run(worker):  # type: ignore[no-untyped-def]
-        task = getattr(worker, "task", None)
-        task_id = getattr(task, "task_id", "")
+    @wraps(original_analysis_finished)
+    def traced_analysis_finished(page, *args, **kwargs):  # type: ignore[no-untyped-def]
+        before_enabled, before_text = _button_snapshot(page)
         write_download_event(
-            "diag.worker.run_enter",
-            task_id=task_id,
-            cancel_requested=bool(worker._cancel_event.is_set()),
+            "diag.quick.analysis_finished_enter",
+            mode=str(getattr(page, "_analysis_mode", "")),
+            button_enabled=before_enabled,
+            button_text=before_text,
+            queue_running=bool(getattr(page, "_queue_running", False)),
+            waiting=bool(getattr(page, "_queue_waiting_for_analysis", False)),
+            statuses=_status_snapshot(page),
         )
-        started = perf_counter()
-        try:
-            return original_worker_run(worker)
-        except Exception as error:
-            write_download_event(
-                "diag.worker.run_exception",
-                task_id=task_id,
-                error=repr(error),
-            )
-            raise
-        finally:
-            write_download_event(
-                "diag.worker.run_exit",
-                task_id=task_id,
-                elapsed_ms=f"{(perf_counter() - started) * 1000.0:.1f}",
-                cancel_requested=bool(worker._cancel_event.is_set()),
-            )
+        result = original_analysis_finished(page, *args, **kwargs)
 
-    DownloadWorker.run = traced_worker_run
-
-    original_download = BaseDownloadService.download
-
-    @wraps(original_download)
-    def traced_download(service, task, *args, **kwargs):  # type: ignore[no-untyped-def]
+        # QThread finished 처리까지 끝난 최종 상태에서 한 번 더 확정한다. 빠른 추가
+        # 카드와 상단 시작 버튼이 서로 다른 상태로 남는 것을 방지한다.
+        page._refresh_list_state()
+        after_enabled, after_text = _button_snapshot(page)
         write_download_event(
-            "diag.service.download_enter",
-            task_id=getattr(task, "task_id", ""),
-            output_stem=bool(getattr(task, "output_stem", "")),
-        )
-        started = perf_counter()
-        try:
-            return original_download(service, task, *args, **kwargs)
-        except Exception as error:
-            write_download_event(
-                "diag.service.download_exception",
-                task_id=getattr(task, "task_id", ""),
-                elapsed_ms=f"{(perf_counter() - started) * 1000.0:.1f}",
-                error=repr(error),
-            )
-            raise
-        finally:
-            write_download_event(
-                "diag.service.download_exit",
-                task_id=getattr(task, "task_id", ""),
-                elapsed_ms=f"{(perf_counter() - started) * 1000.0:.1f}",
-            )
-
-    BaseDownloadService.download = traced_download
-
-    original_filename_title = TemplatedDownloadService._filename_title
-
-    @wraps(original_filename_title)
-    def traced_filename_title(service, task):  # type: ignore[no-untyped-def]
-        task_id = getattr(task, "task_id", "")
-        write_download_event(
-            "diag.filename.resolve_enter",
-            task_id=task_id,
-        )
-        started = perf_counter()
-        try:
-            result = original_filename_title(service, task)
-        except Exception as error:
-            write_download_event(
-                "diag.filename.resolve_exception",
-                task_id=task_id,
-                elapsed_ms=f"{(perf_counter() - started) * 1000.0:.1f}",
-                error=repr(error),
-            )
-            raise
-        write_download_event(
-            "diag.filename.resolve_exit",
-            task_id=task_id,
-            elapsed_ms=f"{(perf_counter() - started) * 1000.0:.1f}",
-            stem_length=len(result),
+            "diag.quick.analysis_finished_exit",
+            button_enabled=after_enabled,
+            button_text=after_text,
+            queue_running=bool(getattr(page, "_queue_running", False)),
+            waiting=bool(getattr(page, "_queue_waiting_for_analysis", False)),
+            statuses=_status_snapshot(page),
         )
         return result
 
-    TemplatedDownloadService._filename_title = traced_filename_title
+    DownloadPage._analysis_finished = traced_analysis_finished
+
+    original_init = DownloadPage.__init__
+
+    @wraps(original_init)
+    def traced_init(page, *args, **kwargs):  # type: ignore[no-untyped-def]
+        original_init(page, *args, **kwargs)
+
+        page.start_all_button.pressed.connect(
+            lambda: write_download_event(
+                "diag.queue.button_pressed",
+                button_enabled=page.start_all_button.isEnabled(),
+                button_text=page.start_all_button.text(),
+                statuses=_status_snapshot(page),
+            )
+        )
+        page.start_all_button.released.connect(
+            lambda: write_download_event(
+                "diag.queue.button_released",
+                button_enabled=page.start_all_button.isEnabled(),
+                button_text=page.start_all_button.text(),
+                statuses=_status_snapshot(page),
+            )
+        )
+        page.start_all_button.clicked.connect(
+            lambda: write_download_event(
+                "diag.queue.button_clicked",
+                button_enabled=page.start_all_button.isEnabled(),
+                button_text=page.start_all_button.text(),
+                statuses=_status_snapshot(page),
+            )
+        )
+
+    DownloadPage.__init__ = traced_init
+
     _INSTALLED = True
-    write_download_event("diag.download_start_tracing_installed")
+    write_download_event("diag.quick_add_queue_guard_installed")
