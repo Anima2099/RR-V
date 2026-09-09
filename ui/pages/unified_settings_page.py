@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.component_updates import ComponentUpdateCheckResult
+from app.download_preferences import DownloadPreferences
 from app.general_preferences import (
     FILE_COLLISION_NUMBERED,
     FILE_COLLISION_OVERWRITE,
@@ -129,6 +130,62 @@ class SettingsPage(_BaseSettingsPage):
                 self._create_download_preferences_card(),
             ]
         )
+
+    def _create_download_preferences_card(self) -> QFrame:
+        card = _BaseSettingsPage._create_download_preferences_card(self)
+
+        self.split_chapters_checkbox = QCheckBox(
+            "영상의 챕터를 각각 별도 파일로 저장"
+        )
+        self.split_chapters_checkbox.setObjectName("previewCheckBox")
+        split_hint = QLabel(
+            "내장 챕터가 있는 영상은 정상 다운로드가 끝난 뒤 원본 품질을 유지한 채 "
+            "챕터별 파일을 추가로 만듭니다. 챕터가 없으면 평소처럼 다운로드만 완료합니다."
+        )
+        split_hint.setObjectName("mutedText")
+        split_hint.setWordWrap(True)
+
+        # 기존 프리셋 카드의 '썸네일과 정보' 영역에 자연스럽게 붙인다. 기반 카드의
+        # 레이아웃을 복제하지 않아 기존 설정 UI 변경의 영향 범위를 줄인다.
+        info_title = next(
+            (
+                label
+                for label in card.findChildren(QLabel)
+                if label.text() == "썸네일과 정보"
+            ),
+            None,
+        )
+        info_group = info_title.parentWidget() if info_title is not None else None
+        info_layout = info_group.layout() if info_group is not None else None
+        if info_layout is not None:
+            info_layout.addWidget(self.split_chapters_checkbox)
+            info_layout.addWidget(split_hint)
+
+        return card
+
+    def _set_controls(self, preferences: DownloadPreferences) -> None:
+        _BaseSettingsPage._set_controls(self, preferences)
+        if hasattr(self, "split_chapters_checkbox"):
+            self.split_chapters_checkbox.setChecked(preferences.split_chapters)
+        self._update_audio_controls()
+
+    def _preferences_from_controls(self) -> DownloadPreferences:
+        preferences = _BaseSettingsPage._preferences_from_controls(self)
+        return replace(
+            preferences,
+            split_chapters=(
+                self.split_chapters_checkbox.isChecked()
+                if hasattr(self, "split_chapters_checkbox")
+                else False
+            ),
+        )
+
+    def _update_audio_controls(self) -> None:
+        _BaseSettingsPage._update_audio_controls(self)
+        if hasattr(self, "split_chapters_checkbox"):
+            self.split_chapters_checkbox.setEnabled(
+                not self.audio_only_checkbox.isChecked()
+            )
 
     def _create_download_common_save_bar(self) -> QFrame:
         bar = QFrame()
@@ -426,6 +483,10 @@ _copy_methods(
         "_reset_selected_scope",
         "_create_general_tab",
         "_create_preset_tab",
+        "_create_download_preferences_card",
+        "_set_controls",
+        "_preferences_from_controls",
+        "_update_audio_controls",
         "_load_preferences_into_controls",
         "_apply_general_preferences_to_controls",
         "_save_general_preferences",
@@ -443,6 +504,10 @@ _copy_methods(
         "_create_notification_card",
         "_create_general_tab",
         "_create_preset_tab",
+        "_create_download_preferences_card",
+        "_set_controls",
+        "_preferences_from_controls",
+        "_update_audio_controls",
         "_load_preferences_into_controls",
         "_apply_general_preferences_to_controls",
         "_save_general_preferences",
