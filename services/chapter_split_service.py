@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-import queue
 import re
 import shutil
 import subprocess
@@ -116,32 +115,36 @@ def build_chapter_split_command(
         "copy",
         "-avoid_negative_ts",
         "make_zero",
-        "-progress",
-        "pipe:1",
-        "-nostats",
         str(output_path),
     ]
 
 
 class ChapterSplitService:
+    """완성된 미디어 파일을 내장 챕터 구간대로 무손실 분리한다.
+
+    모든 조각을 같은 드라이브의 숨김 임시 폴더에 먼저 완성한 뒤 최종 폴더를
+    한 번에 교체한다. 실패/취소 중에는 기존 챕터 결과 폴더를 건드리지 않는다.
+    """
+
     def __init__(self) -> None:
         self.ffmpeg = find_executable("ffmpeg.exe") or find_executable("ffmpeg")
         self._process: subprocess.Popen[str] | None = None
         self._process_lock = threading.Lock()
 
-    def suggested_output_directory(self, media_info: MediaFileInfo) -> Path:
-        input_path = Path(media_info.path).expanduser()
-        base = input_path.with_name(f"{input_path.stem}_chapters")
-
+    @staticmethod
+    def _overwrite_enabled() -> bool:
         try:
-            overwrite = (
+            return (
                 load_general_preferences().file_collision_mode
                 == FILE_COLLISION_OVERWRITE
             )
         except Exception:
-            overwrite = False
+            return False
 
-        if overwrite or not base.exists():
+    def suggested_output_directory(self, media_info: MediaFileInfo) -> Path:
+        input_path = Path(media_info.path).expanduser()
+        base = input_path.with_name(f"{input_path.stem}_chapters")
+        if self._overwrite_enabled() or not base.exists():
             return base
 
         counter = 1
@@ -186,6 +189,7 @@ class ChapterSplitService:
                 "입력 파일에 확장자가 없습니다.",
             )
 
+        overwrite = self._overwrite_enabled()
         output_directory = self.suggested_output_directory(media_info)
         temporary_directory = input_path.parent / (
             f".{input_path.stem}.rrv-chapters-{uuid4().hex[:8]}"
@@ -198,16 +202,14 @@ class ChapterSplitService:
                 str(error),
             ) from error
 
-        temporary_outputs: list[Path] = []
         total = len(chapters)
+        temporary_names: list[str] = []
         if on_progress is not None:
             on_progress(0)
 
         try:
             for offset, chapter in enumerate(chapters):
-                if is_cancelled is not None and is_cancelled():
-                    raise ChapterSplitCancelledError("챕터 분할 중지됨")
-
+                self._raise_if_cancelled(is_cancelled)
                 position = offset + 1
                 filename = chapter_output_filename(
                     chapter,
@@ -216,7 +218,7 @@ class ChapterSplitService:
                     suffix,
                 )
                 temporary_output = temporary_directory / filename
-                temporary_outputs.append(temporary_output)
+                temporary_names.append(filename)
 
                 title = chapter.title.strip() or f"챕터 {position:02d}"
                 if on_phase is not None:
@@ -228,74 +230,22 @@ class ChapterSplitService:
                     temporary_output,
                     chapter,
                 )
-                self._run_ffmpeg(
-                    command,
-                    duration_seconds=chapter.duration_seconds,
-                    on_progress=(
-                        None
-                        if on_progress is None
-                        else lambda chapter_percent, index=offset: on_progress(
-                            min(
-                                99,
-                                int(
-                                    (
-                                        index
-                                        + max(0, min(100, chapter_percent)) / 100.0
-                                    )
-                                    / total
-                                    * 100
-                                ),
-                            )
-                        )
-                    ),
-                    is_cancelled=is_cancelled,
-                )
-
-                if not temporary_output.is_file():
-                    raise ChapterSplitError(
-                        f"챕터 {position} 출력 파일이 생성되지 않았습니다.",
-                        str(temporary_output),
-                    )
-                try:
-                    if temporary_output.stat().st_size <= 0:
-                        raise ChapterSplitError(
-                            f"챕터 {position} 출력 파일이 비어 있습니다.",
-                            str(temporary_output),
-                        )
-                except OSError as error:
-                    raise ChapterSplitError(
-                        f"챕터 {position} 출력 파일을 확인하지 못했습니다.",
-                        str(error),
-                    ) from error
+                self._run_ffmpeg(command, is_cancelled=is_cancelled)
+                self._verify_output(temporary_output, position)
 
                 if on_progress is not None:
                     on_progress(min(99, int(position / total * 100)))
 
-            if is_cancelled is not None and is_cancelled():
-                raise ChapterSplitCancelledError("챕터 분할 중지됨")
+            self._raise_if_cancelled(is_cancelled)
+            self._publish_directory(
+                temporary_directory,
+                output_directory,
+                overwrite=overwrite,
+            )
 
-            try:
-                output_directory.mkdir(parents=True, exist_ok=True)
-            except OSError as error:
-                raise ChapterSplitError(
-                    "챕터 출력 폴더를 만들지 못했습니다.",
-                    str(error),
-                ) from error
-
-            final_outputs: list[str] = []
-            for temporary_output in temporary_outputs:
-                destination = output_directory / temporary_output.name
-                try:
-                    if destination.exists():
-                        destination.unlink()
-                    temporary_output.replace(destination)
-                except OSError as error:
-                    raise ChapterSplitError(
-                        "분할한 챕터 파일을 최종 폴더에 저장하지 못했습니다.",
-                        str(error),
-                    ) from error
-                final_outputs.append(str(destination))
-
+            final_outputs = tuple(
+                str(output_directory / name) for name in temporary_names
+            )
             if on_progress is not None:
                 on_progress(100)
             if on_phase is not None:
@@ -303,10 +253,88 @@ class ChapterSplitService:
 
             return ChapterSplitResult(
                 output_directory=str(output_directory),
-                output_files=tuple(final_outputs),
+                output_files=final_outputs,
             )
         finally:
             shutil.rmtree(temporary_directory, ignore_errors=True)
+
+    @staticmethod
+    def _verify_output(path: Path, position: int) -> None:
+        if not path.is_file():
+            raise ChapterSplitError(
+                f"챕터 {position} 출력 파일이 생성되지 않았습니다.",
+                str(path),
+            )
+        try:
+            if path.stat().st_size <= 0:
+                raise ChapterSplitError(
+                    f"챕터 {position} 출력 파일이 비어 있습니다.",
+                    str(path),
+                )
+        except OSError as error:
+            raise ChapterSplitError(
+                f"챕터 {position} 출력 파일을 확인하지 못했습니다.",
+                str(error),
+            ) from error
+
+    def _publish_directory(
+        self,
+        temporary_directory: Path,
+        output_directory: Path,
+        *,
+        overwrite: bool,
+    ) -> None:
+        if output_directory.exists() and not overwrite:
+            raise ChapterSplitError(
+                "챕터 출력 폴더가 이미 존재합니다.",
+                str(output_directory),
+            )
+
+        backup_path: Path | None = None
+        if output_directory.exists():
+            backup_path = output_directory.with_name(
+                f".{output_directory.name}.rrv-backup-{uuid4().hex[:8]}"
+            )
+            try:
+                output_directory.replace(backup_path)
+            except OSError as error:
+                raise ChapterSplitError(
+                    "기존 챕터 출력 폴더를 안전하게 교체할 준비를 하지 못했습니다.",
+                    str(error),
+                ) from error
+
+        try:
+            temporary_directory.replace(output_directory)
+        except OSError as error:
+            if backup_path is not None and backup_path.exists():
+                try:
+                    backup_path.replace(output_directory)
+                except OSError:
+                    pass
+            raise ChapterSplitError(
+                "완성된 챕터 파일을 최종 폴더에 저장하지 못했습니다.",
+                str(error),
+            ) from error
+        else:
+            if backup_path is not None:
+                self._remove_path_quietly(backup_path)
+
+    @staticmethod
+    def _remove_path_quietly(path: Path) -> None:
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    @staticmethod
+    def _raise_if_cancelled(
+        is_cancelled: Callable[[], bool] | None,
+    ) -> None:
+        if is_cancelled is not None and is_cancelled():
+            raise ChapterSplitCancelledError("챕터 분할 중지됨")
 
     def cancel(self) -> None:
         with self._process_lock:
@@ -336,8 +364,6 @@ class ChapterSplitService:
         self,
         command: list[str],
         *,
-        duration_seconds: float,
-        on_progress: ProgressCallback | None,
         is_cancelled: Callable[[], bool] | None,
     ) -> None:
         creation_flags = (
@@ -349,12 +375,11 @@ class ChapterSplitService:
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
                 creationflags=creation_flags,
-                bufsize=1,
             )
         except OSError as error:
             raise ChapterSplitError(
@@ -365,82 +390,24 @@ class ChapterSplitService:
         with self._process_lock:
             self._process = process
 
-        lines: queue.Queue[str | None] = queue.Queue()
-        collected: list[str] = []
-
-        def read_output() -> None:
-            assert process.stdout is not None
-            try:
-                for line in process.stdout:
-                    lines.put(line)
-            finally:
-                lines.put(None)
-
-        reader = threading.Thread(target=read_output, daemon=True)
-        reader.start()
-
         try:
-            reader_done = False
             while True:
                 if is_cancelled is not None and is_cancelled():
                     self.cancel()
                     raise ChapterSplitCancelledError("챕터 분할 중지됨")
-
                 try:
-                    line = lines.get(timeout=0.1)
-                except queue.Empty:
-                    line = ""
-
-                if line is None:
-                    reader_done = True
-                elif line:
-                    collected.append(line)
-                    self._apply_progress_line(
-                        line,
-                        duration_seconds=duration_seconds,
-                        on_progress=on_progress,
-                    )
-
-                if process.poll() is not None and reader_done:
+                    stdout, stderr = process.communicate(timeout=0.2)
                     break
-
-            return_code = process.wait()
+                except subprocess.TimeoutExpired:
+                    continue
         finally:
             with self._process_lock:
                 if self._process is process:
                     self._process = None
-            reader.join(timeout=1.0)
 
-        if return_code != 0:
-            detail = "".join(collected[-80:]).strip()
+        if process.returncode != 0:
+            detail = (stderr or stdout or "").strip()
             raise ChapterSplitError(
                 "FFmpeg가 챕터 분할을 완료하지 못했습니다.",
-                detail or f"FFmpeg 종료 코드: {return_code}",
+                detail[-12000:] or f"FFmpeg 종료 코드: {process.returncode}",
             )
-
-    @staticmethod
-    def _apply_progress_line(
-        line: str,
-        *,
-        duration_seconds: float,
-        on_progress: ProgressCallback | None,
-    ) -> None:
-        if on_progress is None or duration_seconds <= 0:
-            return
-        text = line.strip()
-        if "=" not in text:
-            return
-        key, value = text.split("=", 1)
-        if key not in {"out_time_us", "out_time_ms"}:
-            return
-        try:
-            current_seconds = max(0.0, float(value) / 1_000_000.0)
-        except ValueError:
-            return
-        percent = int(
-            max(
-                0.0,
-                min(100.0, current_seconds / duration_seconds * 100.0),
-            )
-        )
-        on_progress(percent)
