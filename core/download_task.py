@@ -50,6 +50,7 @@ class DownloadTask:
     audio_format: str = "M4A"
     audio_quality: str = "최고"
     preserve_metadata: bool = True
+    split_chapters: bool = False
     progress: int = 0
     speed: str = "-"
     eta: str = "-"
