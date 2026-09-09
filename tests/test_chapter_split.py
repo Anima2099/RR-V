@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tempfile
 import unittest
 
 from app.download_preferences import DownloadPreferences
 from app.preset_store import DownloadPreset
 from core.local_media_info import MediaChapter, MediaFileInfo
 from services.chapter_split_service import (
+    ChapterSplitService,
     build_chapter_split_command,
     chapter_output_filename,
     sanitize_chapter_title,
@@ -90,6 +92,27 @@ class ChapterSplitServiceTests(unittest.TestCase):
                 (25.0, 30.0, "End"),
             ),
         )
+
+    def test_atomic_publish_replaces_old_folder_only_after_new_folder_is_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / "video_chapters"
+            old.mkdir()
+            (old / "old.txt").write_text("old", encoding="utf-8")
+
+            prepared = root / ".prepared"
+            prepared.mkdir()
+            (prepared / "01 - Intro.mp4").write_text("new", encoding="utf-8")
+
+            service = ChapterSplitService()
+            service._publish_directory(prepared, old, overwrite=True)
+
+            self.assertFalse(prepared.exists())
+            self.assertFalse((old / "old.txt").exists())
+            self.assertEqual(
+                (old / "01 - Intro.mp4").read_text(encoding="utf-8"),
+                "new",
+            )
 
 
 class ChapterSplitPresetTests(unittest.TestCase):
