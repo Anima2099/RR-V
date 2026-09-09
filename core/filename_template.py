@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 
 DEFAULT_FILENAME_TEMPLATE = "{제목}"
@@ -29,6 +29,7 @@ _TOKEN_PATTERN = re.compile(r"\{([^{}]+)\}")
 _DURATION_HOURS_PATTERN = re.compile(r"(\d+)\s*시간")
 _DURATION_MINUTES_PATTERN = re.compile(r"(\d+)\s*분")
 _DURATION_SECONDS_PATTERN = re.compile(r"(\d+)\s*초")
+_RESOLUTION_PATTERN = re.compile(r"(?<!\d)(\d{2,4})p\b", re.IGNORECASE)
 _NO_AUTO_SPACE_AFTER = frozenset("-_./\\:;|,[({")
 _NO_AUTO_SPACE_BEFORE = frozenset("-_./\\:;|,[]()}")
 
@@ -138,41 +139,75 @@ def normalize_upload_date(value: object) -> str:
     return ""
 
 
+def resolution_height_limit(selected_resolution: object) -> int | None:
+    raw = str(selected_resolution or "").strip()
+    if not raw or raw == "최고 화질":
+        return None
+
+    aliases = {
+        "8K (4320p)": 4320,
+        "4K (2160p)": 2160,
+    }
+    if raw in aliases:
+        return aliases[raw]
+
+    match = _RESOLUTION_PATTERN.search(raw)
+    if match is None:
+        return None
+    height = int(match.group(1))
+    return height if height > 0 else None
+
+
+def detected_resolution_heights(
+    resolutions: Iterable[object],
+) -> tuple[int, ...]:
+    heights: set[int] = set()
+    for resolution in resolutions:
+        match = _RESOLUTION_PATTERN.search(str(resolution or "").strip())
+        if match is None:
+            continue
+        height = int(match.group(1))
+        if height > 0:
+            heights.add(height)
+    return tuple(sorted(heights, reverse=True))
+
+
 def resolution_filename_label(
     selected_resolution: object,
     *,
-    probed_height: int | None = None,
+    available_resolutions: Iterable[object] = (),
     audio_only: bool = False,
 ) -> str:
     if audio_only:
         return "오디오"
-    if probed_height is not None and probed_height > 0:
-        return f"{int(probed_height)}p"
 
     raw = str(selected_resolution or "").strip()
-    mapping = {
-        "8K (4320p)": "4320p",
-        "4K (2160p)": "2160p",
-        "1440p": "1440p",
-        "1080p": "1080p",
-        "720p": "720p",
-        "480p": "480p",
-        "최고 화질": "최고화질",
-    }
-    return mapping.get(raw, raw.replace(" ", "") or "해상도미상")
+    detected_heights = detected_resolution_heights(available_resolutions)
+    if raw == "최고 화질":
+        if detected_heights:
+            return f"{detected_heights[0]}p"
+        return "최고화질"
+
+    limit = resolution_height_limit(raw)
+    if limit is not None:
+        eligible = [height for height in detected_heights if height <= limit]
+        if eligible:
+            return f"{max(eligible)}p"
+        return f"{limit}p"
+
+    return raw.replace(" ", "") or "해상도미상"
 
 
 def codec_filename_label(
     selected_codec: object,
     *,
-    probed_codec: object = "",
     audio_only: bool = False,
     audio_format: object = "",
 ) -> str:
     if audio_only:
         return str(audio_format or "오디오").strip() or "오디오"
 
-    raw = str(probed_codec or selected_codec or "").strip()
+    raw = str(selected_codec or "").strip()
     lowered = raw.lower()
     if lowered.startswith("avc1") or lowered in {"h264", "h.264"}:
         return "H264"
@@ -231,13 +266,12 @@ def filename_template_values(
     video_id: object,
     extractor: object,
     resolution: object = "",
+    available_resolutions: Iterable[object] = (),
     upload_date: object = "",
     duration_text: object = "",
     duration_seconds: float | int | None = None,
     preset: object = "",
     codec: object = "",
-    probed_height: int | None = None,
-    probed_codec: object = "",
     audio_only: bool = False,
     audio_format: object = "",
 ) -> dict[str, str]:
@@ -253,7 +287,7 @@ def filename_template_values(
         "사이트": site_label(extractor),
         "해상도": resolution_filename_label(
             resolution,
-            probed_height=probed_height,
+            available_resolutions=available_resolutions,
             audio_only=audio_only,
         ),
         "업로드날짜": date8 or "날짜미상",
@@ -269,7 +303,6 @@ def filename_template_values(
         or "기본 다운로드",
         "코덱": codec_filename_label(
             codec,
-            probed_codec=probed_codec,
             audio_only=audio_only,
             audio_format=audio_format,
         ),
