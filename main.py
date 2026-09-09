@@ -97,8 +97,8 @@ def main() -> int:
         except WindowsStartupError as error:
             print(f"RR-V Windows startup registration sync failed: {error}")
 
-    # 1.4에서는 안정화된 기본 셸을 유지하면서 다운로드 페이지만 refinement한다.
-    from ui.main_window_refined import MainWindow
+    # 테마 선택과 Dark SVG 경로를 먼저 확정한 뒤 UI 모듈을 불러온다.
+    from ui.main_window import MainWindow
 
     window = MainWindow()
     external_service.request_received.connect(window.handle_external_request)
