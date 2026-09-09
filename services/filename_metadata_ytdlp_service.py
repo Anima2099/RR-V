@@ -13,7 +13,7 @@ from services.ytdlp_service import (
 
 
 class YtDlpService(_BaseYtDlpService):
-    """기존 영상 분석 결과에서 파일명 템플릿용 메타데이터도 함께 보관한다."""
+    """기존 영상 분석 결과에서 후속 처리용 메타데이터도 함께 보관한다."""
 
     @staticmethod
     def _to_media_info(url: str, info: dict[str, Any]) -> MediaInfo:
@@ -24,6 +24,7 @@ class YtDlpService(_BaseYtDlpService):
                 info.get("upload_date") or info.get("release_date") or ""
             ),
             resolutions=media_info.resolutions,
+            chapters=info.get("chapters") or (),
         )
         return media_info
 
