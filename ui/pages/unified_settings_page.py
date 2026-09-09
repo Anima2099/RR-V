@@ -7,7 +7,9 @@ from pathlib import Path
 
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -24,8 +26,9 @@ from app.general_preferences import (
 )
 from core.filename_template import (
     DEFAULT_FILENAME_TEMPLATE,
-    FILENAME_TEMPLATE_TOKENS,
+    FILENAME_TEMPLATE_TOKEN_DEFINITIONS,
     filename_template_values,
+    insert_filename_template_token,
     normalize_filename_template,
     render_filename_template,
     validate_filename_template,
@@ -175,32 +178,55 @@ class SettingsPage(_BaseSettingsPage):
             self._refresh_filename_template_preview
         )
 
-        token_row = QHBoxLayout()
-        token_row.setSpacing(8)
-        for token in FILENAME_TEMPLATE_TOKENS:
-            label = token[1:-1]
-            if label == "영상ID":
-                label = "영상 ID"
+        token_grid = QGridLayout()
+        token_grid.setHorizontalSpacing(8)
+        token_grid.setVerticalSpacing(8)
+        for index, (token, label) in enumerate(FILENAME_TEMPLATE_TOKEN_DEFINITIONS):
             button = QPushButton(f"+ {label}")
             button.setObjectName("secondaryButton")
+            button.setToolTip(f"파일명 템플릿에 {token} 추가")
             button.clicked.connect(
                 lambda checked=False, value=token:
                 self._insert_filename_template_token(value)
             )
-            token_row.addWidget(button)
+            row, column = divmod(index, 5)
+            token_grid.addWidget(button, row, column)
+        for column in range(5):
+            token_grid.setColumnStretch(column, 1)
+
+        option_row = QHBoxLayout()
+        option_row.setSpacing(10)
+
+        self.filename_template_auto_spacing_checkbox = QCheckBox(
+            "토큰 추가 시 자동으로 띄어쓰기"
+        )
+        self.filename_template_auto_spacing_checkbox.setObjectName(
+            "settingsCheckbox"
+        )
+        self.filename_template_auto_spacing_checkbox.setChecked(
+            self._general_preferences.filename_template_auto_spacing
+        )
 
         reset_button = QPushButton("기본값")
         reset_button.setObjectName("secondaryButton")
         reset_button.clicked.connect(self._reset_filename_template)
-        token_row.addStretch()
-        token_row.addWidget(reset_button)
+
+        option_row.addWidget(self.filename_template_auto_spacing_checkbox)
+        option_row.addStretch()
+        option_row.addWidget(reset_button)
 
         helper = QLabel(
-            "사용 가능: {제목} · {채널명} · {영상ID} · {사이트} "
-            "예: [{채널명}] {제목} [{영상ID}]"
+            "공백이나 -, _, [ ], ( ) 등을 자유롭게 넣어 항목을 구분할 수 있습니다. "
+            "자동 띄어쓰기는 위 버튼으로 토큰을 추가할 때만 적용됩니다."
         )
         helper.setObjectName("mutedText")
         helper.setWordWrap(True)
+
+        date_helper = QLabel(
+            "업로드 날짜 8자리 예: 20260909 · 6자리 예: 260909"
+        )
+        date_helper.setObjectName("mutedText")
+        date_helper.setWordWrap(True)
 
         self.filename_template_preview = QLabel("")
         self.filename_template_preview.setObjectName("mutedText")
@@ -209,8 +235,10 @@ class SettingsPage(_BaseSettingsPage):
         layout.addWidget(title)
         layout.addWidget(description)
         layout.addWidget(self.filename_template_input)
-        layout.addLayout(token_row)
+        layout.addLayout(token_grid)
+        layout.addLayout(option_row)
         layout.addWidget(helper)
+        layout.addWidget(date_helper)
         layout.addWidget(self.filename_template_preview)
 
         self._refresh_filename_template_preview()
@@ -218,10 +246,16 @@ class SettingsPage(_BaseSettingsPage):
 
     def _insert_filename_template_token(self, token: str) -> None:
         input_widget = self.filename_template_input
-        text = input_widget.text()
-        position = input_widget.cursorPosition()
-        input_widget.setText(text[:position] + token + text[position:])
-        input_widget.setCursorPosition(position + len(token))
+        text, cursor_position = insert_filename_template_token(
+            input_widget.text(),
+            input_widget.cursorPosition(),
+            token,
+            auto_spacing=(
+                self.filename_template_auto_spacing_checkbox.isChecked()
+            ),
+        )
+        input_widget.setText(text)
+        input_widget.setCursorPosition(cursor_position)
         input_widget.setFocus()
 
     def _reset_filename_template(self) -> None:
@@ -243,6 +277,11 @@ class SettingsPage(_BaseSettingsPage):
             uploader="샘플 채널",
             video_id="abc123",
             extractor="Youtube",
+            resolution="1080p",
+            upload_date="20260909",
+            duration_text="12분 34초",
+            preset="기본 다운로드",
+            codec="H.264",
         )
         preview = render_filename_template(template, sample_values)
         self.filename_template_preview.setText(f"예시 파일명: {preview}.mp4")
@@ -259,6 +298,10 @@ class SettingsPage(_BaseSettingsPage):
                 self._general_preferences.filename_template
             )
             self._refresh_filename_template_preview()
+        if hasattr(self, "filename_template_auto_spacing_checkbox"):
+            self.filename_template_auto_spacing_checkbox.setChecked(
+                self._general_preferences.filename_template_auto_spacing
+            )
 
     def _save_general_preferences(self) -> None:
         # 일반 탭은 프로그램 동작만 저장한다. 다운로드 결과 파일 관련 설정은
@@ -299,6 +342,9 @@ class SettingsPage(_BaseSettingsPage):
             self._general_preferences,
             default_download_folder=folder,
             filename_template=template,
+            filename_template_auto_spacing=(
+                self.filename_template_auto_spacing_checkbox.isChecked()
+            ),
             file_collision_mode=(
                 FILE_COLLISION_OVERWRITE
                 if self.overwrite_file_radio.isChecked()
