@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 import unittest
 
+from app.download_preferences import DownloadPreferences
+from app.preset_store import DownloadPreset
 from core.local_media_info import MediaChapter, MediaFileInfo
 from services.chapter_split_service import (
     build_chapter_split_command,
@@ -11,6 +12,7 @@ from services.chapter_split_service import (
     sanitize_chapter_title,
     valid_chapters,
 )
+from services.filename_metadata_ytdlp_service import _source_chapters
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,29 +70,87 @@ class ChapterSplitServiceTests(unittest.TestCase):
         self.assertIn("-c copy", joined)
         self.assertIn("-avoid_negative_ts make_zero", joined)
 
-
-class ChapterSplitUiContractTests(unittest.TestCase):
-    def test_media_tools_registers_chapter_split_page(self) -> None:
-        path = ROOT / "ui" / "pages" / "media_tools_page.py"
-        source = path.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=str(path))
-
-        self.assertIn(
-            "from ui.tools.chapter_split_page import ChapterSplitPage",
-            source,
+    def test_source_chapters_fills_missing_end_from_next_start_and_duration(self) -> None:
+        chapters = _source_chapters(
+            {
+                "duration": 30,
+                "chapters": [
+                    {"start_time": 0, "title": "Intro"},
+                    {"start_time": 10, "title": "Main"},
+                    {"start_time": 25, "title": "End"},
+                ],
+            }
         )
-        self.assertIn('"챕터 분할"', source)
-        self.assertIn("self.chapter_split_page = ChapterSplitPage()", source)
-        self.assertIn("self.tool_stack.addWidget(self.chapter_split_page)", source)
-        self.assertIn("self.chapter_split_page.has_active_operation", source)
-        self.assertIn("self.chapter_split_page.shutdown()", source)
 
-        media_tools_class = next(
-            node
-            for node in tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "MediaToolsPage"
+        self.assertEqual(
+            chapters,
+            (
+                (0.0, 10.0, "Intro"),
+                (10.0, 25.0, "Main"),
+                (25.0, 30.0, "End"),
+            ),
         )
-        self.assertIsNotNone(media_tools_class)
+
+
+class ChapterSplitPresetTests(unittest.TestCase):
+    def test_audio_only_normalization_disables_chapter_split(self) -> None:
+        preferences = DownloadPreferences(
+            split_chapters=True,
+            audio_only=True,
+        ).normalized()
+
+        self.assertFalse(preferences.split_chapters)
+
+    def test_preset_round_trip_preserves_chapter_split_option(self) -> None:
+        preset = DownloadPreset.from_preferences(
+            "챕터 테스트",
+            DownloadPreferences(split_chapters=True),
+            preset_id="chapter-test",
+        )
+        payload = preset.to_dict()
+        restored = DownloadPreset.from_dict(payload)
+
+        self.assertTrue(payload["split_chapters"])
+        self.assertTrue(restored.split_chapters)
+        self.assertTrue(restored.to_preferences().split_chapters)
+
+
+class ChapterSplitIntegrationContractTests(unittest.TestCase):
+    def test_media_tools_does_not_expose_standalone_chapter_splitter(self) -> None:
+        source = (ROOT / "ui" / "pages" / "media_tools_page.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("ChapterSplitPage", source)
+        self.assertNotIn('"챕터 분할"', source)
+        self.assertFalse((ROOT / "ui" / "tools" / "chapter_split_page.py").exists())
+        self.assertFalse((ROOT / "workers" / "chapter_split_worker.py").exists())
+
+    def test_settings_exposes_split_as_preset_option(self) -> None:
+        source = (ROOT / "ui" / "pages" / "unified_settings_page.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("영상의 챕터를 각각 별도 파일로 저장", source)
+        self.assertIn("preferences.split_chapters", source)
+        self.assertIn("split_chapters=", source)
+
+    def test_download_uses_internal_engine_after_normal_download(self) -> None:
+        source = (ROOT / "services" / "templated_download_service.py").read_text(
+            encoding="utf-8"
+        )
+
+        normal_download = source.index("result = super().download")
+        split_call = source.index("self._chapter_split_service.split")
+        self.assertLess(normal_download, split_call)
+        self.assertIn("ChapterSplitService", source)
+        self.assertIn('"download.chapter_split_completed"', source)
+        self.assertNotIn('"--split-chapters"', source)
+
+    def test_queue_store_persists_chapter_split_intent(self) -> None:
+        source = (ROOT / "app" / "queue_store.py").read_text(encoding="utf-8")
+
+        self.assertIn('split_chapters=bool(raw.get("split_chapters", False))', source)
 
 
 if __name__ == "__main__":
