@@ -49,7 +49,7 @@ from app.url_list_io import (
 )
 from controllers.download_controller import DownloadController
 from core.batch_entry import BatchEntry
-from core.download_task import DownloadStatus, DownloadTask
+from core.download_task import DownloadStatus, DownloadTask, remove_failed_tasks
 from core.media_info import MediaInfo
 from ui.dialogs.batch_add_dialog import BatchAddDialog
 from ui.dialogs.duplicate_url_dialog import (
@@ -57,7 +57,7 @@ from ui.dialogs.duplicate_url_dialog import (
     ask_duplicate_choice,
 )
 from ui.dialogs.subtitle_selection_dialog import default_subtitle_selection
-from ui.dialogs.warm_dialogs import show_warm_message
+from ui.dialogs.warm_dialogs import ask_warm_question, show_warm_message
 from ui.widgets.common import create_card
 from ui.widgets.download_task_list import DownloadTaskList
 from ui.widgets.preview_panel import PreviewPanel
@@ -359,6 +359,15 @@ class DownloadPage(QWidget):
             self._retry_all_failed_tasks
         )
 
+        self.clear_failed_button = QPushButton("실패 삭제")
+        self.clear_failed_button.setObjectName("queueRetryButton")
+        self.clear_failed_button.setToolTip(
+            "실패한 항목을 목록에서 모두 제거합니다. 다운로드 파일은 삭제하지 않습니다."
+        )
+        self.clear_failed_button.clicked.connect(
+            self._remove_failed_tasks
+        )
+
         self.export_txt_button = QPushButton("TXT 내보내기")
         self.export_txt_button.setObjectName("queueRetryButton")
         self.export_txt_button.setToolTip(
@@ -371,6 +380,7 @@ class DownloadPage(QWidget):
         filter_row.addWidget(self.failed_filter_button)
         filter_row.addStretch()
         filter_row.addWidget(self.export_txt_button)
+        filter_row.addWidget(self.clear_failed_button)
         filter_row.addWidget(self.retry_all_failed_button)
         layout.addWidget(self.list_filter_bar)
 
@@ -1523,6 +1533,40 @@ class DownloadPage(QWidget):
             f"실패 작업 {retry_count}개 재시도를 시작했습니다."
         )
 
+    def _remove_failed_tasks(self) -> None:
+        if self._recovery_running():
+            self.toast.show_message(
+                "썸네일/자막 복구가 끝난 뒤 실패 작업을 정리해 주세요."
+            )
+            return
+
+        failed_count = sum(
+            task.status is DownloadStatus.FAILED
+            for task in self.tasks
+        )
+        if not failed_count:
+            self.toast.show_message("삭제할 실패 항목이 없습니다.")
+            return
+
+        confirmed = ask_warm_question(
+            self,
+            "실패 항목 삭제",
+            f"실패한 항목 {failed_count}개를 목록에서 삭제할까요?\n"
+            "다운로드된 파일은 삭제되지 않습니다.",
+            yes_text="삭제",
+            no_text="취소",
+        )
+        if not confirmed:
+            return
+
+        self.tasks, failed_ids = remove_failed_tasks(self.tasks)
+        for task_id in failed_ids:
+            self.task_list.remove_task(task_id, emit_signals=False)
+        self._refresh_list_state()
+        self.toast.show_message(
+            f"실패한 항목 {failed_count}개를 목록에서 삭제했습니다."
+        )
+
     def _set_list_filter(
         self,
         filter_name: str,
@@ -2372,6 +2416,19 @@ class DownloadPage(QWidget):
                 f"실패한 작업 {failed_count}개를 다시 시도"
                 if failed_count
                 else "현재 실패한 작업이 없습니다."
+            )
+        )
+        self.clear_failed_button.setText(
+            f"실패 삭제 {failed_count}" if failed_count else "실패 삭제"
+        )
+        self.clear_failed_button.setEnabled(
+            failed_count > 0 and not recovery_running
+        )
+        self.clear_failed_button.setToolTip(
+            (
+                f"실패한 항목 {failed_count}개를 목록에서 삭제"
+                if failed_count
+                else "현재 삭제할 실패 항목이 없습니다."
             )
         )
         self.list_filter_bar.setVisible(count > 0)

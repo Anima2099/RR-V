@@ -99,3 +99,21 @@ class DownloadTask:
             )
             if item
         )
+
+
+def remove_failed_tasks(
+    tasks: list[DownloadTask],
+) -> tuple[list[DownloadTask], list[str]]:
+    failed_ids = [
+        task.task_id
+        for task in tasks
+        if task.status is DownloadStatus.FAILED
+    ]
+    if not failed_ids:
+        return list(tasks), []
+
+    failed_set = set(failed_ids)
+    remaining_tasks = [
+        task for task in tasks if task.task_id not in failed_set
+    ]
+    return remaining_tasks, failed_ids
