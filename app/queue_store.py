@@ -108,7 +108,6 @@ def load_queue() -> QueueLoadResult:
         return QueueLoadResult(tasks=[], error_message=combined)
 
 
-
 def _is_valid_queue_file(path: Path) -> bool:
     try:
         with path.open("r", encoding="utf-8") as handle:
@@ -119,6 +118,7 @@ def _is_valid_queue_file(path: Path) -> bool:
         )
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return False
+
 
 def _load_from_path(path: Path) -> list[DownloadTask]:
     with path.open("r", encoding="utf-8") as handle:
@@ -185,6 +185,7 @@ def _task_from_dict(raw: dict[str, object]) -> DownloadTask | None:
         audio_format=str(raw.get("audio_format", "M4A")),
         audio_quality=str(raw.get("audio_quality", "최고")),
         preserve_metadata=bool(raw.get("preserve_metadata", True)),
+        split_chapters=bool(raw.get("split_chapters", False)),
         progress=_safe_int(raw.get("progress", 0)),
         speed=str(raw.get("speed", "-")),
         eta=str(raw.get("eta", "-")),
@@ -264,7 +265,7 @@ def _read_thumbnail(name: str) -> bytes:
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
     temp_path = path.with_suffix(path.suffix + ".tmp")
     try:
-        with temp_path.open("wb") as handle:
+        with path.with_suffix(path.suffix + ".tmp").open("wb") as handle:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
