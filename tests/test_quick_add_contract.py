@@ -44,7 +44,10 @@ class QuickAddContractTests(unittest.TestCase):
             "self._external_auto_download_task_ids.add(task.task_id)",
             source,
         )
-        self.assertIn("self._start_next_quick_request()", source)
+        self.assertIn(
+            "QTimer.singleShot(0, self._start_next_quick_request)",
+            source,
+        )
 
     def test_completed_quick_task_only_auto_starts_marked_requests(self) -> None:
         source = _download_page_method_source("_complete_quick_task")
