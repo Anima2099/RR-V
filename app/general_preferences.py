@@ -36,6 +36,7 @@ class GeneralPreferences:
     start_with_windows: bool = False
     file_collision_mode: str = FILE_COLLISION_NUMBERED
     filename_template: str = DEFAULT_FILENAME_TEMPLATE
+    filename_template_auto_spacing: bool = True
 
 
 def _settings() -> QSettings:
@@ -156,6 +157,11 @@ def load_general_preferences() -> GeneralPreferences:
         ),
         file_collision_mode=collision_mode,
         filename_template=filename_template,
+        filename_template_auto_spacing=_read_bool(
+            settings,
+            "general/filename_template_auto_spacing",
+            True,
+        ),
     )
 
 
@@ -210,6 +216,10 @@ def save_general_preferences(preferences: GeneralPreferences) -> None:
     settings.setValue(
         "general/filename_template",
         filename_template,
+    )
+    settings.setValue(
+        "general/filename_template_auto_spacing",
+        bool(preferences.filename_template_auto_spacing),
     )
     settings.sync()
 
