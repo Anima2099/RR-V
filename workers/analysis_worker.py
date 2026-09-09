@@ -4,7 +4,7 @@ import threading
 
 from PySide6.QtCore import QThread, Signal
 
-from services.ytdlp_service import (
+from services.filename_metadata_ytdlp_service import (
     AnalysisCancelledError,
     MediaAnalysisError,
     YtDlpService,
