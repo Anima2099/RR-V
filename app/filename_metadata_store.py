@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 from threading import Lock
 from time import time
+import unicodedata
 
 from app.paths import RRV_LOCAL_DIR
 from core.filename_template import normalize_upload_date
@@ -24,6 +25,7 @@ _RESOLUTION_PATTERN = re.compile(r"^(\d{2,4})p$", re.IGNORECASE)
 class FilenameMetadata:
     upload_date: str = ""
     resolutions: tuple[str, ...] = ()
+    chapters: tuple[tuple[float, float, str], ...] = ()
 
 
 def remember_filename_metadata(
@@ -31,20 +33,24 @@ def remember_filename_metadata(
     *,
     upload_date: object = "",
     resolutions: object = (),
+    chapters: object = (),
 ) -> None:
-    """최초 영상 분석에서 얻은 파일명용 메타데이터를 작은 로컬 캐시에 보관한다.
+    """최초 영상 분석에서 후속 처리에 필요한 작은 메타데이터를 보관한다.
 
-    파일명 템플릿 때문에 같은 URL을 다시 yt-dlp로 조회하지 않도록 하기 위한
-    보조 캐시다. 캐시 저장 실패는 영상 분석이나 다운로드 실패로 전파하지 않는다.
+    파일명 템플릿과 챕터 분할 때문에 같은 URL을 다시 yt-dlp로 조회하지 않도록
+    하기 위한 보조 캐시다. 캐시 저장 실패는 영상 분석이나 다운로드 실패로
+    전파하지 않는다.
     """
     cache_key = _hashed_identity(identity_key)
     if not cache_key:
         return
 
     normalized_resolutions = _normalize_resolutions(resolutions)
+    normalized_chapters = _normalize_chapters(chapters)
     entry = {
         "upload_date": normalize_upload_date(upload_date),
         "resolutions": list(normalized_resolutions),
+        "chapters": [list(item) for item in normalized_chapters],
         "updated_at": time(),
     }
 
@@ -75,6 +81,7 @@ def load_filename_metadata(identity_key: object) -> FilenameMetadata:
         return FilenameMetadata(
             upload_date=normalize_upload_date(raw.get("upload_date", "")),
             resolutions=_normalize_resolutions(raw.get("resolutions", ())),
+            chapters=_normalize_chapters(raw.get("chapters", ())),
         )
 
 
@@ -98,6 +105,43 @@ def _normalize_resolutions(value: object) -> tuple[str, ...]:
         if height > 0:
             heights.add(height)
     return tuple(f"{height}p" for height in sorted(heights, reverse=True))
+
+
+def _normalize_chapters(value: object) -> tuple[tuple[float, float, str], ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+
+    normalized: list[tuple[float, float, str]] = []
+    for item in value:
+        start: object
+        end: object
+        title: object
+        if isinstance(item, dict):
+            start = item.get("start_time", item.get("start", 0.0))
+            end = item.get("end_time", item.get("end", start))
+            title = item.get("title", "")
+        elif isinstance(item, (list, tuple)) and len(item) >= 2:
+            start = item[0]
+            end = item[1]
+            title = item[2] if len(item) >= 3 else ""
+        else:
+            continue
+
+        try:
+            start_seconds = max(0.0, float(start))
+            end_seconds = max(0.0, float(end))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if end_seconds - start_seconds <= 0.05:
+            continue
+
+        chapter_title = unicodedata.normalize(
+            "NFC", str(title or "")
+        ).strip()
+        normalized.append((start_seconds, end_seconds, chapter_title))
+
+    normalized.sort(key=lambda item: (item[0], item[1]))
+    return tuple(normalized)
 
 
 def _load_cache_locked() -> dict[str, dict[str, object]]:
