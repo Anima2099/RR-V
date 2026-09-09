@@ -29,11 +29,19 @@ class FilenameMetadataStoreTests(unittest.TestCase):
             identity,
             upload_date="2026-09-09",
             resolutions=("1080p", "2160p", "1080p", "bad"),
+            chapters=(
+                (0, 10, "Intro"),
+                (10, 25.5, "Main"),
+            ),
         )
 
         loaded = metadata_store.load_filename_metadata(identity)
         self.assertEqual(loaded.upload_date, "20260909")
         self.assertEqual(loaded.resolutions, ("2160p", "1080p"))
+        self.assertEqual(
+            loaded.chapters,
+            ((0.0, 10.0, "Intro"), (10.0, 25.5, "Main")),
+        )
 
         raw = metadata_store._METADATA_PATH.read_text(encoding="utf-8")
         self.assertNotIn(identity, raw)
@@ -47,8 +55,9 @@ class FilenameMetadataStoreTests(unittest.TestCase):
         loaded = metadata_store.load_filename_metadata("youtube:abc")
         self.assertEqual(loaded.upload_date, "")
         self.assertEqual(loaded.resolutions, ())
+        self.assertEqual(loaded.chapters, ())
 
-    def test_initial_analysis_records_upload_date_and_resolutions(self) -> None:
+    def test_initial_analysis_records_upload_date_resolutions_and_chapters(self) -> None:
         url = "https://www.youtube.com/watch?v=abc123"
         raw_info = {
             "id": "abc123",
@@ -63,6 +72,10 @@ class FilenameMetadataStoreTests(unittest.TestCase):
                 {"height": 2160},
                 {"height": 720},
             ],
+            "chapters": [
+                {"start_time": 0, "end_time": 10, "title": "Intro"},
+                {"start_time": 10, "end_time": 123, "title": "Main"},
+            ],
         }
 
         with patch(
@@ -75,6 +88,7 @@ class FilenameMetadataStoreTests(unittest.TestCase):
             media_info.identity_key,
             upload_date="20260909",
             resolutions=("2160p", "1080p", "720p"),
+            chapters=((0.0, 10.0, "Intro"), (10.0, 123.0, "Main")),
         )
 
 
