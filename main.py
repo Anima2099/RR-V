@@ -97,14 +97,8 @@ def main() -> int:
         except WindowsStartupError as error:
             print(f"RR-V Windows startup registration sync failed: {error}")
 
-    # 테마 선택과 Dark SVG 경로를 먼저 확정한 뒤 UI 모듈을 불러온다.
-    from ui.main_window import MainWindow
-
-    # 다운로드 시작 경로의 회귀를 잡기 위한 임시 진단 계층이다. MainWindow를
-    # 만들기 전에 설치해야 QPushButton 연결도 진단 래퍼를 바라본다.
-    from app.download_diagnostics import install_download_diagnostics
-
-    install_download_diagnostics()
+    # 1.4에서는 안정화된 기본 셸을 유지하면서 다운로드 페이지만 refinement한다.
+    from ui.main_window_refined import MainWindow
 
     window = MainWindow()
     external_service.request_received.connect(window.handle_external_request)
