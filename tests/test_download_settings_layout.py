@@ -91,7 +91,23 @@ class DownloadSettingsLayoutTests(unittest.TestCase):
         }
         self.assertIn("default_download_folder", keyword_names)
         self.assertIn("filename_template", keyword_names)
+        self.assertIn("filename_template_auto_spacing", keyword_names)
         self.assertIn("file_collision_mode", keyword_names)
+
+    def test_filename_template_card_exposes_auto_spacing_and_date_guidance(self) -> None:
+        method = self._method("_create_filename_template_card")
+        strings = {
+            node.value
+            for node in ast.walk(method)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        }
+        self.assertIn("토큰 추가 시 자동으로 띄어쓰기", strings)
+        self.assertTrue(
+            any("업로드 날짜 8자리 예" in value for value in strings)
+        )
+        self.assertTrue(
+            any("공백이나 -, _, [ ], ( )" in value for value in strings)
+        )
 
 
 if __name__ == "__main__":
