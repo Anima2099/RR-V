@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime
 import inspect
+from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -16,6 +17,11 @@ from PySide6.QtWidgets import (
 )
 
 from app.component_updates import ComponentUpdateCheckResult
+from app.general_preferences import (
+    FILE_COLLISION_NUMBERED,
+    FILE_COLLISION_OVERWRITE,
+    save_general_preferences,
+)
 from core.filename_template import (
     DEFAULT_FILENAME_TEMPLATE,
     FILENAME_TEMPLATE_TOKENS,
@@ -40,7 +46,14 @@ class SettingsPage(_BaseSettingsPage):
 
     component_check_finished = Signal(object, bool)
     open_tools_requested = Signal()
-    _VISIBLE_TAB_ORDER = _CommunityLayer._VISIBLE_TAB_ORDER
+    _VISIBLE_TAB_ORDER = (
+        (_BaseSettingsPage.GENERAL_TAB, "일반"),
+        (_BaseSettingsPage.YOUTUBE_TAB, "사이트 인증"),
+        (_BaseSettingsPage.INTEGRATION_TAB, "브라우저 확장"),
+        (_BaseSettingsPage.TOOLS_TAB, "도구 및 리소스"),
+        (_BaseSettingsPage.PRESET_TAB, "다운로드 설정"),
+        (_BaseSettingsPage.BACKUP_TAB, "백업 및 복구"),
+    )
 
     def __init__(self) -> None:
         self._initializing_settings_page = True
@@ -75,9 +88,6 @@ class SettingsPage(_BaseSettingsPage):
         scroll = self._create_scroll_page(
             [
                 self._create_theme_card(),
-                self._create_download_folder_card(),
-                self._create_filename_template_card(),
-                self._create_file_collision_card(),
                 self._create_queue_restore_card(),
                 self._create_windows_behavior_card(),
                 self._create_notification_card(),
@@ -105,6 +115,42 @@ class SettingsPage(_BaseSettingsPage):
         save_layout.addWidget(save_button)
         page_layout.addWidget(save_bar, 0)
         return page
+
+    def _create_preset_tab(self):  # type: ignore[no-untyped-def]
+        return self._create_scroll_page(
+            [
+                self._create_download_folder_card(),
+                self._create_filename_template_card(),
+                self._create_file_collision_card(),
+                self._create_download_common_save_bar(),
+                self._create_download_preferences_card(),
+            ]
+        )
+
+    def _create_download_common_save_bar(self) -> QFrame:
+        bar = QFrame()
+        bar.setObjectName("settingsSaveBar")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setSpacing(10)
+
+        scope = QLabel("저장 위치 · 파일명 · 동일 파일 처리")
+        scope.setObjectName("mutedText")
+
+        self.download_settings_save_status = QLabel("")
+        self.download_settings_save_status.setObjectName("settingsSavedStatus")
+        self.download_settings_save_status.setWordWrap(True)
+
+        save_button = QPushButton("공통 설정 저장")
+        save_button.setObjectName("primaryButton")
+        save_button.setFixedHeight(36)
+        save_button.setMinimumWidth(132)
+        save_button.clicked.connect(self._save_download_settings)
+
+        layout.addWidget(scope)
+        layout.addWidget(self.download_settings_save_status, 1)
+        layout.addWidget(save_button)
+        return bar
 
     def _create_filename_template_card(self) -> QFrame:
         card, layout = create_card()
@@ -202,30 +248,74 @@ class SettingsPage(_BaseSettingsPage):
         self.filename_template_preview.setText(f"예시 파일명: {preview}.mp4")
 
     def _load_preferences_into_controls(self) -> None:
+        # 프리셋 탭을 다시 열 때는 프리셋 값만 새로 읽는다. 파일명 템플릿 등
+        # 공통 다운로드 설정의 저장 전 편집값은 사용자가 저장하거나 되돌릴 때까지 유지한다.
         _BaseSettingsPage._load_preferences_into_controls(self)
+
+    def _apply_general_preferences_to_controls(self) -> None:
+        _BaseSettingsPage._apply_general_preferences_to_controls(self)
         if hasattr(self, "filename_template_input"):
             self.filename_template_input.setText(
                 self._general_preferences.filename_template
             )
             self._refresh_filename_template_preview()
 
-    def _save_general_tab_changes(self) -> None:
+    def _save_general_preferences(self) -> None:
+        # 일반 탭은 프로그램 동작만 저장한다. 다운로드 결과 파일 관련 설정은
+        # 다운로드 설정 탭의 공통 저장 버튼이 전담한다.
+        preferences = replace(
+            self._general_preferences,
+            restore_queue_on_start=self.restore_queue_checkbox.isChecked(),
+            keep_completed_tasks=self.keep_completed_checkbox.isChecked(),
+            confirm_close_during_download=self.confirm_close_checkbox.isChecked(),
+            notify_queue_complete=self.notify_queue_checkbox.isChecked(),
+            notify_completion_sound=self.notify_completion_sound_checkbox.isChecked(),
+        )
+        save_general_preferences(preferences)
+        self._general_preferences = preferences
+        if hasattr(self, "general_save_status"):
+            self.general_save_status.setText("저장됨")
+            QTimer.singleShot(1800, lambda: self.general_save_status.setText(""))
+        self.general_preferences_saved.emit()
+
+    def _save_download_settings(self) -> None:
         template = normalize_filename_template(
             self.filename_template_input.text()
         )
         valid, message = validate_filename_template(template)
         if not valid:
-            self.general_tab_save_status.setText(
+            self.download_settings_save_status.setText(
                 f"파일명 템플릿 확인 필요 · {message}"
             )
             self._refresh_filename_template_preview()
             return
 
-        self.filename_template_input.setText(template)
-        self._general_preferences = replace(
+        folder = self.download_folder_input.text().strip()
+        if not folder:
+            folder = str(Path.home() / "Downloads")
+            self.download_folder_input.setText(folder)
+
+        preferences = replace(
             self._general_preferences,
+            default_download_folder=folder,
             filename_template=template,
+            file_collision_mode=(
+                FILE_COLLISION_OVERWRITE
+                if self.overwrite_file_radio.isChecked()
+                else FILE_COLLISION_NUMBERED
+            ),
         )
+        save_general_preferences(preferences)
+        self._general_preferences = preferences
+        self.filename_template_input.setText(template)
+        self.download_settings_save_status.setText("공통 다운로드 설정이 저장되었습니다.")
+        self.general_preferences_saved.emit()
+        QTimer.singleShot(
+            2200,
+            lambda: self.download_settings_save_status.setText(""),
+        )
+
+    def _save_general_tab_changes(self) -> None:
         _CommunityLayer._save_general_tab_changes(self)
 
     def _refresh_tool_status(self) -> None:
@@ -289,7 +379,10 @@ _copy_methods(
         "_restore_from_backup",
         "_reset_selected_scope",
         "_create_general_tab",
+        "_create_preset_tab",
         "_load_preferences_into_controls",
+        "_apply_general_preferences_to_controls",
+        "_save_general_preferences",
         "_save_general_tab_changes",
     },
 )
@@ -303,7 +396,10 @@ _copy_methods(
         "_create_windows_behavior_card",
         "_create_notification_card",
         "_create_general_tab",
+        "_create_preset_tab",
         "_load_preferences_into_controls",
+        "_apply_general_preferences_to_controls",
+        "_save_general_preferences",
         "_save_general_tab_changes",
     },
 )
