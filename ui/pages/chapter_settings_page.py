@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from PySide6.QtWidgets import QCheckBox, QLabel
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QCheckBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.chapter_preferences import (
     load_delete_original_after_split,
@@ -18,18 +28,75 @@ class UnifiedSettingsPage(_BaseSettingsPage):
     """1.4 챕터와 빠른 추가 관련 다운로드 옵션을 설정 화면에 추가한다."""
 
     def _create_preset_tab(self):  # type: ignore[no-untyped-def]
-        # 빠른 추가 자동 다운로드는 프리셋 값이 아니라 RR-V 전체 동작 설정이다.
-        # 기존 다운로드 설정 구성은 유지하면서 별도 카드로 명확히 분리한다.
-        return self._create_scroll_page(
+        # 공통 다운로드 동작과 프리셋 편집은 저장 계약이 서로 독립적이다.
+        # 기존 컨트롤/저장 메서드는 그대로 두고 표시 컨테이너만 두 페이지로
+        # 나눠, 긴 다운로드 설정 화면을 안전하게 압축한다.
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(8)
+
+        subtab_bar = QFrame()
+        subtab_bar.setObjectName("toolTabBar")
+        subtab_layout = QHBoxLayout(subtab_bar)
+        subtab_layout.setContentsMargins(10, 10, 10, 0)
+        subtab_layout.setSpacing(8)
+
+        self.download_settings_subtab_group = QButtonGroup(self)
+        self.download_settings_subtab_group.setExclusive(True)
+        self.download_settings_subtab_buttons: list[QPushButton] = []
+
+        for index, name in enumerate(("공통 설정", "다운로드 프리셋")):
+            button = QPushButton(name)
+            # 기존의 작은 선택 버튼 스타일을 재사용해 최상위 설정 탭보다
+            # 한 단계 낮은 시각 계층을 유지하고 Light/Dark 테마를 함께 따른다.
+            button.setObjectName("queueFilterButton")
+            button.setCheckable(True)
+            button.setMinimumWidth(160)
+            button.clicked.connect(
+                lambda checked=False, page_index=index:
+                self._show_download_settings_subtab(page_index)
+            )
+            self.download_settings_subtab_group.addButton(button, index)
+            self.download_settings_subtab_buttons.append(button)
+            subtab_layout.addWidget(button)
+        subtab_layout.addStretch()
+
+        self.download_settings_substack = QStackedWidget()
+        self.download_settings_substack.setObjectName("toolStack")
+
+        common_page = self._create_scroll_page(
             [
                 self._create_download_folder_card(),
-                self._create_filename_template_card(),
-                self._create_file_collision_card(),
                 self._create_quick_add_behavior_card(),
+                self._create_file_collision_card(),
+                self._create_filename_template_card(),
                 self._create_download_common_save_bar(),
+            ]
+        )
+        preset_page = self._create_scroll_page(
+            [
                 self._create_download_preferences_card(),
             ]
         )
+        self.download_settings_substack.addWidget(common_page)
+        self.download_settings_substack.addWidget(preset_page)
+
+        page_layout.addWidget(subtab_bar, 0)
+        page_layout.addWidget(self.download_settings_substack, 1)
+
+        self.download_settings_subtab_buttons[0].setChecked(True)
+        self.download_settings_substack.setCurrentIndex(0)
+        return page
+
+    def _show_download_settings_subtab(self, index: int) -> None:
+        if not hasattr(self, "download_settings_substack"):
+            return
+        if index < 0 or index >= self.download_settings_substack.count():
+            index = 0
+        self.download_settings_substack.setCurrentIndex(index)
+        if hasattr(self, "download_settings_subtab_buttons"):
+            self.download_settings_subtab_buttons[index].setChecked(True)
 
     def _create_quick_add_behavior_card(self):  # type: ignore[no-untyped-def]
         card, layout = create_card()
