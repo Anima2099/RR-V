@@ -8,6 +8,21 @@ import unicodedata
 from core.download_task import DownloadStatus, DownloadTask
 
 
+_THUMBNAIL_EXTENSIONS = {".webp", ".png", ".jpg", ".jpeg", ".avif"}
+_SUBTITLE_EXTENSIONS = {
+    ".srt",
+    ".vtt",
+    ".ass",
+    ".ssa",
+    ".lrc",
+    ".ttml",
+    ".srv1",
+    ".srv2",
+    ".srv3",
+    ".json3",
+}
+
+
 @dataclass(slots=True, frozen=True)
 class PartialCleanupResult:
     deleted: tuple[str, ...] = ()
@@ -55,12 +70,14 @@ def find_partial_download_files(task: DownloadTask) -> tuple[Path, ...]:
     """현재 작업이 만든 것으로 확인되는 yt-dlp 미완성 산출물만 찾는다.
 
     .part/.ytdl은 output_stem, 작업 로그, 현재 세션의 파일명/시각을 교차 확인한다.
-    썸네일 내장/별도 저장 과정에서 중지 때문에 남은 WEBP/PNG/JPG 같은 이미지도
-    현재 작업에서 생성된 것이 확인되는 경우에만 정리 후보에 넣는다. 이때 시각
-    기준은 계속 갱신되는 raw log mtime이 아니라 다운로드 시작 때 고정한 값을 쓴다.
+    썸네일 내장 과정에서 중지 때문에 남은 WEBP/PNG/JPG 같은 이미지와, 자막을
+    영상에 내장하기 위해 먼저 받은 SRT/VTT 등의 sidecar도 현재 작업에서 생성된
+    것이 확인되는 경우에만 정리 후보에 넣는다. 이때 시각 기준은 계속 갱신되는
+    raw log mtime이 아니라 다운로드 시작 때 고정한 값을 쓴다.
+
     yt-dlp의 --trim-filenames로 실제 파일명이 잘린 경우에도 현재 세션의 긴 공통
-    파일명 접두부를 확인해서 해당 작업의 임시 썸네일을 찾는다.
-    사용자가 '썸네일 JPG 별도 저장'을 선택했다면 완성 JPG/JPEG는 보존한다.
+    파일명 접두부를 확인한다. 사용자가 '썸네일 JPG 별도 저장'을 선택한 JPG/JPEG와
+    자막을 영상에 내장하지 않은 작업의 외부 자막은 최종 결과물이므로 보존한다.
     """
 
     directory = Path(task.save_path).expanduser()
@@ -104,22 +121,36 @@ def find_partial_download_files(task: DownloadTask) -> tuple[Path, ...]:
                 candidates.append(path)
             continue
 
-        if not _is_temporary_thumbnail_name(task, path.name):
+        if _is_temporary_thumbnail_name(task, path.name):
+            session_match = _matches_current_thumbnail_session(
+                path,
+                stem_identity=stem_identity,
+                download_started_at=download_started_at,
+            )
+            if _matches_current_sidecar_artifact(
+                path,
+                stem_match=stem_match,
+                log_match=log_match,
+                session_match=session_match,
+                download_started_at=download_started_at,
+            ):
+                candidates.append(path)
             continue
 
-        thumbnail_session_match = _matches_current_thumbnail_session(
-            path,
-            stem_identity=stem_identity,
-            download_started_at=download_started_at,
-        )
-        if _matches_current_thumbnail_artifact(
-            path,
-            stem_match=stem_match,
-            log_match=log_match,
-            session_match=thumbnail_session_match,
-            download_started_at=download_started_at,
-        ):
-            candidates.append(path)
+        if _is_temporary_subtitle_name(task, path.name):
+            session_match = _matches_current_subtitle_session(
+                path,
+                stem_identity=stem_identity,
+                download_started_at=download_started_at,
+            )
+            if _matches_current_sidecar_artifact(
+                path,
+                stem_match=stem_match,
+                log_match=log_match,
+                session_match=session_match,
+                download_started_at=download_started_at,
+            ):
+                candidates.append(path)
 
     return tuple(sorted(candidates, key=lambda item: item.name.casefold()))
 
@@ -161,7 +192,11 @@ def partial_cleanup_scan_diagnostics(task: DownloadTask) -> tuple[str, ...]:
     for path in entries:
         if not path.is_file():
             continue
-        if not _is_incomplete_name(path.name) and not _is_thumbnail_extension(path.name):
+        if (
+            not _is_incomplete_name(path.name)
+            and not _is_thumbnail_extension(path.name)
+            and not _is_subtitle_extension(path.name)
+        ):
             continue
 
         name_key = _text_key(path.name)
@@ -177,7 +212,11 @@ def partial_cleanup_scan_diagnostics(task: DownloadTask) -> tuple[str, ...]:
             modified_at = path.stat().st_mtime
         except OSError:
             modified_at = 0.0
-        delta = modified_at - started_at if started_at > 0.0 and modified_at > 0.0 else 0.0
+        delta = (
+            modified_at - started_at
+            if started_at is not None and started_at > 0.0 and modified_at > 0.0
+            else 0.0
+        )
 
         if _is_incomplete_name(path.name):
             session_match = _matches_current_download_session(
@@ -190,7 +229,7 @@ def partial_cleanup_scan_diagnostics(task: DownloadTask) -> tuple[str, ...]:
             kind = "partial"
             eligible = True
             extra = f"session={int(session_match)}"
-        else:
+        elif _is_thumbnail_extension(path.name):
             eligible = _is_temporary_thumbnail_name(task, path.name)
             session_match = bool(
                 eligible
@@ -202,7 +241,7 @@ def partial_cleanup_scan_diagnostics(task: DownloadTask) -> tuple[str, ...]:
             )
             candidate = bool(
                 eligible
-                and _matches_current_thumbnail_artifact(
+                and _matches_current_sidecar_artifact(
                     path,
                     stem_match=stem_match,
                     log_match=log_match,
@@ -211,13 +250,33 @@ def partial_cleanup_scan_diagnostics(task: DownloadTask) -> tuple[str, ...]:
                 )
             )
             kind = "thumb"
-            extra = (
-                f"eligible={int(eligible)};session={int(session_match)}"
+            extra = f"eligible={int(eligible)};session={int(session_match)}"
+        else:
+            eligible = _is_temporary_subtitle_name(task, path.name)
+            session_match = bool(
+                eligible
+                and _matches_current_subtitle_session(
+                    path,
+                    stem_identity=stem_identity,
+                    download_started_at=started_at,
+                )
             )
+            candidate = bool(
+                eligible
+                and _matches_current_sidecar_artifact(
+                    path,
+                    stem_match=stem_match,
+                    log_match=log_match,
+                    session_match=session_match,
+                    download_started_at=started_at,
+                )
+            )
+            kind = "subtitle"
+            extra = f"eligible={int(eligible)};session={int(session_match)}"
 
-        # 임시 썸네일은 후보에서 탈락해도 판정 근거를 남겨 다음 스모크에서
+        # 부가 sidecar는 후보에서 탈락해도 판정 근거를 남겨 다음 스모크에서
         # 파일명 잘림/시각/설정 중 무엇이 원인인지 바로 확인할 수 있게 한다.
-        if candidate or stem_match or log_match or (kind == "thumb" and eligible):
+        if candidate or stem_match or log_match or (kind in {"thumb", "subtitle"} and eligible):
             details.append(
                 f"{path.name};kind={kind};candidate={int(candidate)};"
                 f"stem={int(stem_match)};log={int(log_match)};{extra};"
@@ -225,7 +284,8 @@ def partial_cleanup_scan_diagnostics(task: DownloadTask) -> tuple[str, ...]:
             )
 
     if not details:
-        return (f"none;started_at={started_at:.3f}",)
+        started_text = started_at if started_at is not None else 0.0
+        return (f"none;started_at={started_text:.3f}",)
     return tuple(details[:12])
 
 
@@ -239,7 +299,11 @@ def _is_incomplete_name(name: str) -> bool:
 
 
 def _is_thumbnail_extension(name: str) -> bool:
-    return Path(name).suffix.casefold() in {".webp", ".png", ".jpg", ".jpeg", ".avif"}
+    return Path(name).suffix.casefold() in _THUMBNAIL_EXTENSIONS
+
+
+def _is_subtitle_extension(name: str) -> bool:
+    return Path(name).suffix.casefold() in _SUBTITLE_EXTENSIONS
 
 
 def _is_temporary_thumbnail_name(task: DownloadTask, name: str) -> bool:
@@ -247,7 +311,7 @@ def _is_temporary_thumbnail_name(task: DownloadTask, name: str) -> bool:
         return False
 
     suffix = Path(name).suffix.casefold()
-    if suffix not in {".webp", ".png", ".jpg", ".jpeg", ".avif"}:
+    if suffix not in _THUMBNAIL_EXTENSIONS:
         return False
 
     # UI의 '썸네일 JPG 별도 저장'은 최종 JPG 결과를 명시적으로 요청한 것이다.
@@ -256,7 +320,15 @@ def _is_temporary_thumbnail_name(task: DownloadTask, name: str) -> bool:
     return True
 
 
-def _matches_current_thumbnail_artifact(
+def _is_temporary_subtitle_name(task: DownloadTask, name: str) -> bool:
+    """영상 내장을 위해 받은 자막 sidecar만 미완성 정리 대상으로 본다."""
+
+    if task.audio_only or not task.embed_subtitles or not task.subtitle_tracks:
+        return False
+    return _is_subtitle_extension(name)
+
+
+def _matches_current_sidecar_artifact(
     path: Path,
     *,
     stem_match: bool,
@@ -292,6 +364,26 @@ def _matches_current_thumbnail_session(
         return False
 
     candidate_identity = _thumbnail_filename_identity(path.name)
+    return _has_matching_filename_prefix(stem_identity, candidate_identity)
+
+
+def _matches_current_subtitle_session(
+    path: Path,
+    *,
+    stem_identity: str,
+    download_started_at: float | None,
+) -> bool:
+    if not stem_identity or download_started_at is None:
+        return False
+
+    try:
+        modified_at = path.stat().st_mtime
+    except OSError:
+        return False
+    if modified_at < download_started_at - 5.0:
+        return False
+
+    candidate_identity = _subtitle_filename_identity(path.name)
     return _has_matching_filename_prefix(stem_identity, candidate_identity)
 
 
@@ -364,6 +456,16 @@ def _partial_filename_identity(name: str) -> str:
 def _thumbnail_filename_identity(name: str) -> str:
     base = re.sub(
         r"\.(?:webp|png|jpe?g|avif)$",
+        "",
+        name,
+        flags=re.IGNORECASE,
+    )
+    return _filename_identity(base)
+
+
+def _subtitle_filename_identity(name: str) -> str:
+    base = re.sub(
+        r"\.(?:srt|vtt|ass|ssa|lrc|ttml|srv[123]|json3)$",
         "",
         name,
         flags=re.IGNORECASE,
