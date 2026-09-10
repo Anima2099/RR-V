@@ -19,6 +19,14 @@ _VALID_UPDATE_CHANNELS = {UPDATE_CHANNEL_STABLE, UPDATE_CHANNEL_BETA}
 _PRERELEASE_TAG_MARKERS = ("beta", "alpha", "preview", "pre", "rc")
 _INSTALLER_NAME_PREFIX = "rr-v_setup_"
 _INSTALLER_MAX_SIZE = 300 * 1024 * 1024
+_RELEASE_NOTES_STOP_HEADINGS = (
+    "설치",
+    "installer 검증",
+    "인스톨러 검증",
+    "지원 환경",
+    "license",
+    "라이선스",
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -39,6 +47,7 @@ class AppUpdateResult:
     update_channel: str = UPDATE_CHANNEL_STABLE
     latest_release_channel: str = ""
     installer: AppInstallerAsset | None = None
+    release_notes: str = ""
 
 
 def normalize_update_channel(value: str, default: str = UPDATE_CHANNEL_STABLE) -> str:
@@ -51,6 +60,93 @@ def normalize_update_channel(value: str, default: str = UPDATE_CHANNEL_STABLE) -
 
 def update_channel_label(value: str) -> str:
     return "베타" if normalize_update_channel(value) == UPDATE_CHANNEL_BETA else "정식"
+
+
+def release_notes_preview(
+    value: object,
+    *,
+    max_lines: int = 20,
+    max_chars: int = 1800,
+) -> str:
+    """GitHub Release 본문에서 앱 안에 보여줄 짧은 변경사항만 만든다.
+
+    Release 본문은 Markdown이므로 링크 URL과 장식 문법은 걷어내고 읽을 내용만
+    남긴다. 예전처럼 긴 릴리스 본문도 업데이트 카드나 알림창을 과도하게 늘리지
+    않도록 줄 수와 글자 수를 제한한다. 설치/라이선스 같은 상시 안내는 Release
+    페이지에서 확인하고, 앱 안에서는 실제 변경사항에 집중한다.
+    """
+
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    if not text.strip():
+        return ""
+
+    lines: list[str] = []
+    max_lines = max(1, int(max_lines))
+    max_chars = max(80, int(max_chars))
+
+    for raw_line in text.split("\n"):
+        stripped = raw_line.strip()
+        if re.fullmatch(r"[-*_]{3,}", stripped):
+            continue
+
+        heading = re.match(r"^#{1,6}\s+(.+?)\s*$", stripped)
+        if heading is not None:
+            heading_text = _strip_release_note_markdown(heading.group(1))
+            folded = heading_text.casefold()
+            if any(
+                folded == stop or folded.startswith(stop + " ") or folded.startswith(stop + ":")
+                for stop in _RELEASE_NOTES_STOP_HEADINGS
+            ):
+                break
+            # GitHub Release의 첫 H1은 보통 버전명 자체라 카드에서 다시 보여줄
+            # 필요가 없다.
+            if not lines and folded.startswith("rr-v "):
+                continue
+            cleaned = heading_text
+        else:
+            bullet = re.match(r"^[-*+]\s+(.+)$", stripped)
+            if bullet is not None:
+                cleaned = "• " + _strip_release_note_markdown(bullet.group(1))
+            else:
+                cleaned = _strip_release_note_markdown(stripped)
+
+        if not cleaned:
+            if lines and lines[-1] != "":
+                lines.append("")
+            continue
+
+        lines.append(cleaned)
+        if len(lines) >= max_lines:
+            break
+
+    while lines and not lines[-1]:
+        lines.pop()
+    preview = "\n".join(lines).strip()
+    if not preview:
+        return ""
+
+    if len(preview) > max_chars:
+        shortened = preview[: max_chars - 2].rstrip()
+        last_break = max(shortened.rfind("\n"), shortened.rfind(" "))
+        if last_break >= max_chars // 2:
+            shortened = shortened[:last_break].rstrip()
+        preview = shortened + "\n…"
+    elif len(lines) >= max_lines and len(text.split("\n")) > max_lines:
+        preview = preview.rstrip() + "\n…"
+    return preview
+
+
+def _strip_release_note_markdown(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = text.replace("**", "").replace("__", "").replace("~~", "")
+    text = text.replace("`", "")
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _version_tuple(value: str) -> tuple[int, int, int]:
@@ -193,6 +289,7 @@ def _result(
     update_channel: str,
     latest_release_channel: str = "",
     installer: AppInstallerAsset | None = None,
+    release_notes: str = "",
 ) -> AppUpdateResult:
     return AppUpdateResult(
         current_version=APP_VERSION,
@@ -203,6 +300,7 @@ def _result(
         update_channel=update_channel,
         latest_release_channel=latest_release_channel,
         installer=installer,
+        release_notes=release_notes,
     )
 
 
@@ -272,6 +370,7 @@ def check_app_update(
     tag_name = str(latest.get("tag_name") or APP_VERSION)
     latest_version = _display_version(tag_name)
     release_url = str(latest.get("html_url") or RELEASES_PAGE_URL)
+    release_notes = release_notes_preview(latest.get("body"))
 
     latest_key = _release_key(tag_name, latest_release_channel)
     current_channel = normalize_update_channel(APP_RELEASE_CHANNEL)
@@ -305,4 +404,5 @@ def check_app_update(
         update_channel=selected_channel,
         latest_release_channel=latest_release_channel,
         installer=installer,
+        release_notes=release_notes,
     )
