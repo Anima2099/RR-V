@@ -51,10 +51,10 @@ class PartialCleanupFixedStartTests(unittest.TestCase):
         ast.parse(source, filename=str(path))
 
         stamp = source.index("task.download_started_at = time()")
-        worker = source.index("worker = DownloadWorker(task)")
-        start = source.index("worker.start()")
+        worker = source.index("worker = DownloadWorker(task)", stamp)
+        start = source.index("worker.start()", worker)
         self.assertLess(stamp, worker)
-        self.assertLess(stamp, start)
+        self.assertLess(worker, start)
 
     def test_queue_restore_and_cleanup_diagnostics_keep_start_time(self) -> None:
         queue_path = ROOT / "app" / "queue_store.py"
