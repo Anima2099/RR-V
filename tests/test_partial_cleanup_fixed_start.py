@@ -7,7 +7,10 @@ import tempfile
 import unittest
 
 from core.download_task import DownloadStatus, DownloadTask
-from services.partial_download_cleanup import cleanup_partial_download_files
+from services.partial_download_cleanup import (
+    cleanup_partial_download_files,
+    partial_cleanup_scan_diagnostics,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +47,77 @@ class PartialCleanupFixedStartTests(unittest.TestCase):
 
             self.assertIn(str(webp), result.deleted)
             self.assertFalse(webp.exists())
+
+    def test_trimmed_webp_matches_same_download_session(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            started_at = 1_700_000_000.0
+            full_stem = (
+                "STALKER 2 GARBAGE All Artifacts Locations _ Natural Locations + Loot + "
+                "Mission Artifacts #stalker2 Sagar Smith Gaming iwysD9zFvv8 YouTube 1080p "
+                "202508"
+            )
+            trimmed_stem = (
+                "STALKER 2 GARBAGE All Artifacts Locations _ Natural Locations + Loot + "
+                "Mission Artifacts #stalker2 Sagar Smith Gaming iwysD9zFvv8 YouTube 1080p 20"
+            )
+            task = DownloadTask(
+                task_id="trimmed-thumb",
+                title="sample",
+                url="https://example.invalid/video",
+                status=DownloadStatus.STOPPED,
+                save_path=directory,
+                output_stem=full_stem,
+                embed_thumbnail=True,
+                downloaded_bytes=1024,
+                download_started_at=started_at,
+            )
+
+            webp = root / f"{trimmed_stem}.webp"
+            unrelated = root / "another recent thumbnail.webp"
+            webp.write_bytes(b"thumbnail")
+            unrelated.write_bytes(b"other")
+            os.utime(webp, (started_at + 1.0, started_at + 1.0))
+            os.utime(unrelated, (started_at + 1.0, started_at + 1.0))
+
+            result = cleanup_partial_download_files(task)
+
+            self.assertIn(str(webp), result.deleted)
+            self.assertFalse(webp.exists())
+            self.assertTrue(unrelated.exists())
+
+    def test_trimmed_webp_diagnostics_report_session_match(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            started_at = 1_700_000_000.0
+            task = DownloadTask(
+                task_id="trimmed-thumb-diagnostic",
+                title="sample",
+                url="https://example.invalid/video",
+                status=DownloadStatus.STOPPED,
+                save_path=directory,
+                output_stem=(
+                    "STALKER 2 GARBAGE All Artifacts Locations Natural Locations Mission "
+                    "Artifacts Sagar Smith Gaming YouTube 1080p 202508"
+                ),
+                embed_thumbnail=True,
+                download_started_at=started_at,
+            )
+            webp = root / (
+                "STALKER 2 GARBAGE All Artifacts Locations Natural Locations Mission "
+                "Artifacts Sagar Smith Gaming YouTube 1080p 20.webp"
+            )
+            webp.write_bytes(b"thumbnail")
+            os.utime(webp, (started_at + 1.0, started_at + 1.0))
+
+            diagnostics = partial_cleanup_scan_diagnostics(task)
+            joined = "\n".join(diagnostics)
+
+            self.assertIn(webp.name, joined)
+            self.assertIn("kind=thumb", joined)
+            self.assertIn("candidate=1", joined)
+            self.assertIn("eligible=1", joined)
+            self.assertIn("session=1", joined)
 
     def test_download_controller_records_start_time_before_worker_runs(self) -> None:
         path = ROOT / "controllers" / "download_controller.py"
