@@ -28,12 +28,7 @@ def should_offer_partial_cleanup(
     active: bool = False,
     detected_count: int = 0,
 ) -> bool:
-    """목록 삭제 때 미완성 파일 정리 선택을 물어볼지 판단한다.
-
-    중지 직후에는 Windows 파일 핸들이 아직 풀리지 않았거나 yt-dlp 임시 파일명이
-    예상과 달라 사전 탐지가 0개일 수 있다. 실제 다운로드 흔적이 있으면 탐지 결과와
-    별개로 사용자에게 정리 선택권을 제공한다.
-    """
+    """목록 삭제 때 미완성 파일 정리 선택을 물어볼지 판단한다."""
 
     if task.status in {
         DownloadStatus.DOWNLOADING,
@@ -59,11 +54,11 @@ def should_offer_partial_cleanup(
 def find_partial_download_files(task: DownloadTask) -> tuple[Path, ...]:
     """현재 작업이 만든 것으로 확인되는 yt-dlp 미완성 산출물만 찾는다.
 
-    .part/.ytdl은 기존처럼 output_stem, 작업 로그, 현재 세션의 파일명/시각을
-    교차 확인한다. 썸네일 내장/별도 저장 과정에서 중지 때문에 남은 WEBP/PNG/JPG
-    같은 이미지도 현재 작업에서 생성된 것이 확인되는 경우에만 정리 후보에 넣는다.
-    단, 사용자가 '썸네일 JPG 별도 저장'을 선택했다면 완성 JPG/JPEG는 결과물로
-    간주해 보존한다. 완성 영상과 자막 파일도 후보에 넣지 않는다.
+    .part/.ytdl은 output_stem, 작업 로그, 현재 세션의 파일명/시각을 교차 확인한다.
+    썸네일 내장/별도 저장 과정에서 중지 때문에 남은 WEBP/PNG/JPG 같은 이미지도
+    현재 작업에서 생성된 것이 확인되는 경우에만 정리 후보에 넣는다. 이때 시각
+    기준은 계속 갱신되는 raw log mtime이 아니라 다운로드 시작 때 고정한 값을 쓴다.
+    사용자가 '썸네일 JPG 별도 저장'을 선택했다면 완성 JPG/JPEG는 보존한다.
     """
 
     directory = Path(task.save_path).expanduser()
@@ -74,7 +69,7 @@ def find_partial_download_files(task: DownloadTask) -> tuple[Path, ...]:
     stem_key = _text_key(stem)
     stem_identity = _filename_identity(stem)
     log_key = _read_task_log_key(task)
-    log_started_at = _task_log_started_at(task)
+    download_started_at = _task_download_started_at(task)
 
     candidates: list[Path] = []
     try:
@@ -101,7 +96,7 @@ def find_partial_download_files(task: DownloadTask) -> tuple[Path, ...]:
                 task,
                 path,
                 stem_identity=stem_identity,
-                log_started_at=log_started_at,
+                download_started_at=download_started_at,
             )
             if stem_match or log_match or session_match:
                 candidates.append(path)
@@ -114,7 +109,7 @@ def find_partial_download_files(task: DownloadTask) -> tuple[Path, ...]:
             path,
             stem_match=stem_match,
             log_match=log_match,
-            log_started_at=log_started_at,
+            download_started_at=download_started_at,
         ):
             candidates.append(path)
 
@@ -136,6 +131,82 @@ def cleanup_partial_download_files(task: DownloadTask) -> PartialCleanupResult:
     return PartialCleanupResult(tuple(deleted), tuple(failed))
 
 
+def partial_cleanup_scan_diagnostics(task: DownloadTask) -> tuple[str, ...]:
+    """미완성 파일 판별 근거를 다운로드 로그에 남기기 위한 짧은 진단 정보."""
+
+    directory = Path(task.save_path).expanduser()
+    if not directory.is_dir():
+        return ("directory-missing",)
+
+    stem = str(task.output_stem).strip()
+    stem_key = _text_key(stem)
+    stem_identity = _filename_identity(stem)
+    log_key = _read_task_log_key(task)
+    started_at = _task_download_started_at(task)
+
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return ("directory-unreadable",)
+
+    details: list[str] = []
+    for path in entries:
+        if not path.is_file():
+            continue
+        if not _is_incomplete_name(path.name) and not _is_thumbnail_extension(path.name):
+            continue
+
+        name_key = _text_key(path.name)
+        stem_match = bool(stem_key and name_key.startswith(f"{stem_key}."))
+        log_match = bool(
+            log_key
+            and any(
+                probe and probe in log_key
+                for probe in _candidate_log_probes(path.name)
+            )
+        )
+        try:
+            modified_at = path.stat().st_mtime
+        except OSError:
+            modified_at = 0.0
+        delta = modified_at - started_at if started_at > 0.0 and modified_at > 0.0 else 0.0
+
+        if _is_incomplete_name(path.name):
+            session_match = _matches_current_download_session(
+                task,
+                path,
+                stem_identity=stem_identity,
+                download_started_at=started_at,
+            )
+            candidate = stem_match or log_match or session_match
+            kind = "partial"
+            extra = f"session={int(session_match)}"
+        else:
+            eligible = _is_temporary_thumbnail_name(task, path.name)
+            time_match = eligible and _matches_current_thumbnail_artifact(
+                path,
+                stem_match=stem_match,
+                log_match=log_match,
+                download_started_at=started_at,
+            )
+            candidate = bool(time_match)
+            kind = "thumb"
+            extra = f"eligible={int(eligible)}"
+
+        # 한 줄 로그가 지나치게 커지지 않도록 현재 stem 또는 로그와 관련 있는
+        # 파일, 혹은 실제 후보만 남긴다.
+        if candidate or stem_match or log_match:
+            details.append(
+                f"{path.name};kind={kind};candidate={int(candidate)};"
+                f"stem={int(stem_match)};log={int(log_match)};{extra};"
+                f"delta={delta:.3f}s"
+            )
+
+    if not details:
+        return (f"none;started_at={started_at:.3f}",)
+    return tuple(details[:12])
+
+
 def _is_incomplete_name(name: str) -> bool:
     lowered = name.casefold()
     return (
@@ -143,6 +214,10 @@ def _is_incomplete_name(name: str) -> bool:
         or ".part-frag" in lowered
         or lowered.endswith(".ytdl")
     )
+
+
+def _is_thumbnail_extension(name: str) -> bool:
+    return Path(name).suffix.casefold() in {".webp", ".png", ".jpg", ".jpeg", ".avif"}
 
 
 def _is_temporary_thumbnail_name(task: DownloadTask, name: str) -> bool:
@@ -154,7 +229,6 @@ def _is_temporary_thumbnail_name(task: DownloadTask, name: str) -> bool:
         return False
 
     # UI의 '썸네일 JPG 별도 저장'은 최종 JPG 결과를 명시적으로 요청한 것이다.
-    # 중지 시 원본 WEBP/PNG가 남았다면 정리하되 완성 JPG/JPEG는 보존한다.
     if task.save_thumbnail and suffix in {".jpg", ".jpeg"}:
         return False
     return True
@@ -165,19 +239,17 @@ def _matches_current_thumbnail_artifact(
     *,
     stem_match: bool,
     log_match: bool,
-    log_started_at: float | None,
+    download_started_at: float | None,
 ) -> bool:
-    """현재 다운로드가 만든 썸네일 임시 산출물인지 보수적으로 확인한다."""
-
     if log_match:
         return True
-    if not stem_match or log_started_at is None:
+    if not stem_match or download_started_at is None:
         return False
     try:
         modified_at = path.stat().st_mtime
     except OSError:
         return False
-    return modified_at >= log_started_at - 5.0
+    return modified_at >= download_started_at - 5.0
 
 
 def _candidate_log_probes(name: str) -> tuple[str, ...]:
@@ -195,11 +267,9 @@ def _matches_current_download_session(
     path: Path,
     *,
     stem_identity: str,
-    log_started_at: float | None,
+    download_started_at: float | None,
 ) -> bool:
-    """정확한 stem 비교가 빗나간 yt-dlp 임시 이름을 보수적으로 보완한다."""
-
-    if task.downloaded_bytes <= 0 or not stem_identity or log_started_at is None:
+    if task.downloaded_bytes <= 0 or not stem_identity or download_started_at is None:
         return False
 
     try:
@@ -207,8 +277,7 @@ def _matches_current_download_session(
     except OSError:
         return False
 
-    # 작업 로그가 만들어지기 훨씬 전부터 있던 .part는 다른 작업의 찌꺼기로 본다.
-    if modified_at < log_started_at - 5.0:
+    if modified_at < download_started_at - 5.0:
         return False
 
     candidate_identity = _partial_filename_identity(path.name)
@@ -236,7 +305,6 @@ def _matches_current_download_session(
 
 def _partial_filename_identity(name: str) -> str:
     base = _strip_incomplete_suffix(name)
-    # yt-dlp의 임시 파일은 stem 뒤에 f299 같은 포맷 ID와 실제 확장자가 붙을 수 있다.
     base = re.sub(r"\.f\d+(?:-\d+)?$", "", base, flags=re.IGNORECASE)
     base = re.sub(r"\.[A-Za-z0-9]{2,5}$", "", base)
     base = re.sub(r"\.f\d+(?:-\d+)?$", "", base, flags=re.IGNORECASE)
@@ -255,14 +323,22 @@ def _strip_incomplete_suffix(name: str) -> str:
     return name
 
 
-def _task_log_started_at(task: DownloadTask) -> float | None:
+def _task_download_started_at(task: DownloadTask) -> float | None:
+    fixed = float(getattr(task, "download_started_at", 0.0) or 0.0)
+    if fixed > 0.0:
+        return fixed
+
+    # 구버전에서 저장된 대기열처럼 고정 시각이 없는 작업만 호환용 fallback을 쓴다.
+    # raw log의 mtime은 다운로드 중 계속 움직이므로 시작 시각으로 쓰지 않는다.
     raw_path = str(task.raw_log_path).strip()
     if not raw_path:
         return None
     try:
-        return Path(raw_path).stat().st_mtime
+        stat_result = Path(raw_path).stat()
     except OSError:
         return None
+    values = [value for value in (stat_result.st_ctime, stat_result.st_mtime) if value > 0.0]
+    return min(values) if values else None
 
 
 def _read_task_log_key(task: DownloadTask) -> str:
@@ -273,7 +349,6 @@ def _read_task_log_key(task: DownloadTask) -> str:
     if not path.is_file():
         return ""
     try:
-        # 한 작업의 로그만 읽으며, 비정상적으로 커진 경우에도 끝부분이면 충분하다.
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
