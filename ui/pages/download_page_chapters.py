@@ -13,6 +13,7 @@ from services.partial_download_cleanup import (
     PartialCleanupResult,
     cleanup_partial_download_files,
     find_partial_download_files,
+    partial_cleanup_scan_diagnostics,
     should_offer_partial_cleanup,
 )
 from ui.dialogs.warm_dialogs import ask_warm_question
@@ -75,7 +76,6 @@ class DownloadPage(_BaseDownloadPage):
             )
             self.task_list.refresh_task(task.task_id)
         except Exception:
-            # 빠른 추가 자체를 부가 표시 옵션 때문에 실패시키지 않는다.
             pass
         return task
 
@@ -98,7 +98,6 @@ class DownloadPage(_BaseDownloadPage):
             self.task_list.refresh_task(task.task_id)
             self._schedule_queue_save()
         except Exception:
-            # 분석 성공 뒤 표시 보강이 실패해도 기존 빠른 추가 흐름은 유지한다.
             pass
 
     def _create_task_from_preview(self, start_immediately: bool) -> None:
@@ -155,8 +154,6 @@ class DownloadPage(_BaseDownloadPage):
             and "원본 삭제" in chapter_completion
             and "원본 삭제 실패" not in chapter_completion
         )
-        # 원본 삭제 성공 때만 대표 완료 파일이 첫 챕터다. 이 경우 카드의 파일
-        # 크기는 첫 조각 하나가 아니라 챕터 폴더 전체 결과 용량으로 보여준다.
         if delete_succeeded and output_file:
             representative = Path(output_file)
             try:
@@ -212,7 +209,6 @@ class DownloadPage(_BaseDownloadPage):
                 no_text="목록만 삭제",
             ):
                 if active:
-                    # 프로세스가 파일 핸들을 놓은 뒤 정리하도록 작업 객체를 보관한다.
                     self._pending_partial_cleanup[task_id] = task
                 else:
                     cleanup_now = task
@@ -220,7 +216,6 @@ class DownloadPage(_BaseDownloadPage):
         super()._task_removed(task_id)
 
         if cleanup_now is not None:
-            # 다이얼로그가 닫힌 뒤 이벤트 루프로 돌아가서 정리를 시작한다.
             QTimer.singleShot(
                 0,
                 lambda task=cleanup_now: self._start_partial_cleanup(task),
@@ -230,7 +225,6 @@ class DownloadPage(_BaseDownloadPage):
         super()._download_finished(task_id)
         task = self._pending_partial_cleanup.pop(task_id, None)
         if task is not None:
-            # Windows에서 프로세스 종료 직후 파일 핸들이 풀리는 짧은 틈을 피한다.
             QTimer.singleShot(
                 120,
                 lambda task=task: self._start_partial_cleanup(task),
@@ -252,9 +246,17 @@ class DownloadPage(_BaseDownloadPage):
         deleted: tuple[str, ...],
         unresolved_failed: tuple[str, ...],
     ) -> None:
-        # 취소 직후에는 yt-dlp가 .part를 먼저 놓고 썸네일 WEBP 같은 부가 파일을
-        # 조금 늦게 남길 수 있다. 따라서 이번 스캔에서 삭제가 성공했더라도 정해진
-        # 유예 구간 전체를 끝까지 다시 스캔해 뒤늦게 나타난 임시 산출물까지 정리한다.
+        diagnostics = partial_cleanup_scan_diagnostics(task)
+        write_download_event(
+            "download.partial_cleanup_scan",
+            task_id=task.task_id,
+            attempt=attempt + 1,
+            started_at=f"{task.download_started_at:.3f}",
+            embed_thumbnail=task.embed_thumbnail,
+            save_thumbnail=task.save_thumbnail,
+            entries=" || ".join(diagnostics),
+        )
+
         result = cleanup_partial_download_files(task)
         deleted_now = tuple(dict.fromkeys((*deleted, *result.deleted)))
 
