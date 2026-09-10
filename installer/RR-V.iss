@@ -1,5 +1,5 @@
 #define MyAppName "RR-V"
-#define MyAppVersion "1.3.0"
+#define MyAppVersion "1.4.0"
 #define MyAppPublisher "Anima2099"
 #define MyAppURL "https://github.com/Anima2099/RR-V"
 #define MyAppExeName "RR-V.exe"
