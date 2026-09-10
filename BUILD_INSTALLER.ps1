@@ -7,6 +7,8 @@ $InstallerScript = Join-Path $Root "installer\RR-V.iss"
 $ConstantsPath = Join-Path $Root "app\constants.py"
 $DistRoot = Join-Path $Root "dist\RR-V"
 $OutputDir = Join-Path $Root "installer-output"
+$InstallManifestName = "RRV_INSTALL_MANIFEST.txt"
+$InstallManifestPath = Join-Path $DistRoot $InstallManifestName
 
 if (-not (Test-Path $InstallerScript)) {
     throw "Installer script is missing: $InstallerScript"
@@ -88,6 +90,35 @@ if ($BundledForbiddenQt.Count -gt 0) {
     throw ("GPL-only Qt Virtual Keyboard files must not be included in RR-V:`n" + ($BundledForbiddenQt -join "`n"))
 }
 
+# 새 설치본에 실제로 포함되는 파일 목록을 함께 넣는다. Installer는 설치가
+# 성공한 뒤 이 목록에 없는 예전 프로그램 파일만 정리한다. 사용자 설정과
+# 다운로드 도구는 애초에 dist\RR-V 밖에 있으므로 이 manifest의 대상이 아니다.
+if (Test-Path $InstallManifestPath) {
+    Remove-Item -Path $InstallManifestPath -Force
+}
+$ManifestEntries = @(
+    Get-ChildItem -Path $DistRoot -Recurse -File -ErrorAction Stop |
+        ForEach-Object {
+            $_.FullName.Substring($DistRoot.Length).TrimStart('\')
+        } |
+        Where-Object { $_ -and $_ -ne $InstallManifestName } |
+        Sort-Object -Unique
+)
+$ManifestEntries += $InstallManifestName
+$ManifestEntries = @($ManifestEntries | Sort-Object -Unique)
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllLines(
+    $InstallManifestPath,
+    [string[]]$ManifestEntries,
+    $Utf8NoBom
+)
+if (-not (Test-Path $InstallManifestPath)) {
+    throw "RR-V install manifest could not be created: $InstallManifestPath"
+}
+if (-not ($ManifestEntries -contains "RR-V.exe")) {
+    throw "RR-V install manifest does not contain RR-V.exe. Installer build stopped."
+}
+
 $InnoCandidates = @()
 $InnoFromPath = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
 if ($InnoFromPath) {
@@ -118,14 +149,18 @@ if (Test-Path $ExpectedInstaller) {
     Remove-Item -Path $ExpectedInstaller -Force
 }
 
-Write-Host "[1/3] Verifying RR-V $AppVersion release input..."
+Write-Host "[1/4] Verifying RR-V $AppVersion release input..."
 Write-Host ("Input: " + $DistRoot)
 Write-Host "  - App/Installer version match: OK"
 Write-Host "  - Required license/source files: OK"
 Write-Host "  - External runtime tools are not bundled: OK"
 Write-Host "  - Qt Virtual Keyboard is not bundled: OK"
 
-Write-Host "[2/3] Compiling Inno Setup Installer..."
+Write-Host "[2/4] Preparing clean-up manifest..."
+Write-Host ("Manifest: " + $InstallManifestPath)
+Write-Host ("  - Managed files: " + $ManifestEntries.Count)
+
+Write-Host "[3/4] Compiling Inno Setup Installer..."
 Write-Host ("Compiler: " + $Iscc)
 & $Iscc $InstallerScript
 if ($LASTEXITCODE -ne 0) {
@@ -136,7 +171,7 @@ if (-not (Test-Path $ExpectedInstaller)) {
     throw "Installer compilation finished but the expected file was not created: $ExpectedInstaller"
 }
 
-Write-Host "[3/3] Installer build complete."
+Write-Host "[4/4] Installer build complete."
 $InstallerInfo = Get-Item $ExpectedInstaller
 $InstallerHash = (Get-FileHash -Path $ExpectedInstaller -Algorithm SHA256).Hash
 Write-Host ("Output: " + $ExpectedInstaller)
