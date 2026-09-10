@@ -92,14 +92,11 @@ class UnifiedSettingsPage(_BaseSettingsPage):
 
     def _save_preferences(self) -> None:
         preset = self._current_preset()
-        desired_delete = bool(
-            hasattr(self, "delete_original_after_split_checkbox")
-            and self.delete_original_after_split_checkbox.isChecked()
-            and self.split_chapters_checkbox.isChecked()
-            and not self.audio_only_checkbox.isChecked()
-        )
+        desired_delete = self._current_delete_original_value()
+        self.save_status_label.setText("")
         super()._save_preferences()
-        save_delete_original_after_split(preset.preset_id, desired_delete)
+        if self.save_status_label.text() == "저장됨":
+            save_delete_original_after_split(preset.preset_id, desired_delete)
 
     def _create_preset(self) -> None:
         before_ids = {preset.preset_id for preset in self._preset_library.presets}
@@ -144,7 +141,10 @@ class UnifiedSettingsPage(_BaseSettingsPage):
         )
         if created is None:
             return
-        save_delete_original_after_split(created.preset_id, desired_delete)
+        save_delete_original_after_split(
+            created.preset_id,
+            bool(desired_delete and created.split_chapters and not created.audio_only),
+        )
 
 
 __all__ = ["UnifiedSettingsPage"]
