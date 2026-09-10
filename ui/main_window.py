@@ -28,7 +28,7 @@ from app.constants import (
     MINIMUM_WIDTH,
 )
 from ui.pages.about_page import AboutPage
-from ui.pages.download_page import DownloadPage
+from ui.pages.download_page_chapters import DownloadPage
 from ui.pages.media_tools_page import MediaToolsPage
 from ui.pages.unified_settings_page import UnifiedSettingsPage
 from ui.dialogs.warm_dialogs import ask_warm_question, show_warm_message
