@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QScrollArea, QVB
 from app.chapter_preferences import load_delete_original_after_split
 from app.download_preferences import load_download_preferences
 from app.download_log import write_download_event
+from app.general_preferences import load_general_preferences
 from core.download_task import DownloadStatus, DownloadTask, remove_failed_tasks
 from services.partial_download_cleanup import (
     PartialCleanupResult,
@@ -30,6 +31,7 @@ class DownloadPage(_BaseDownloadPage):
 
     def __init__(self) -> None:
         self._pending_partial_cleanup: dict[str, DownloadTask] = {}
+        self._manual_quick_add_auto_requested = False
         super().__init__()
 
     def _create_list_page(self) -> QWidget:
@@ -83,6 +85,18 @@ class DownloadPage(_BaseDownloadPage):
         layout.addWidget(self.preview_scroll, 1)
         return page
 
+    def _quick_add_url(self) -> None:
+        # 기본값 OFF일 때는 검증된 수동 빠른 추가 계약을 그대로 유지한다.
+        # 사용자가 켠 경우에만 현재 한 건을 브라우저 확장 자동 다운로드와 같은
+        # marker/순차 대기열 경로에 태운다.
+        self._manual_quick_add_auto_requested = bool(
+            load_general_preferences().quick_add_auto_download
+        )
+        try:
+            super()._quick_add_url()
+        finally:
+            self._manual_quick_add_auto_requested = False
+
     def _create_quick_placeholder(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         task = super()._create_quick_placeholder(*args, **kwargs)
         try:
@@ -102,6 +116,16 @@ class DownloadPage(_BaseDownloadPage):
             self.task_list.refresh_task(task.task_id)
         except Exception:
             pass
+
+        if self._manual_quick_add_auto_requested:
+            # 이름은 역사적으로 browser 전용이지만, 이 marker를 재사용해야
+            # _complete_quick_task -> _arm_browser_auto_download_queue의 이미 검증된
+            # 단일 순차 다운로드 흐름을 그대로 탈 수 있다.
+            self._external_auto_download_task_ids.add(task.task_id)
+            write_download_event(
+                "queue.manual_quick_auto_armed",
+                task_id=task.task_id,
+            )
         return task
 
     def _complete_quick_task(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
