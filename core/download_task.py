@@ -51,6 +51,7 @@ class DownloadTask:
     audio_quality: str = "최고"
     preserve_metadata: bool = True
     split_chapters: bool = False
+    sponsorblock_chapters: bool = False
     delete_original_after_split: bool = False
     progress: int = 0
     speed: str = "-"
@@ -98,6 +99,8 @@ class DownloadTask:
             self.codec,
             self.subtitle,
         ]
+        if self.sponsorblock_chapters:
+            items.append("SponsorBlock 챕터")
         if self.split_chapters:
             items.append("챕터별 저장")
             if self.delete_original_after_split:
