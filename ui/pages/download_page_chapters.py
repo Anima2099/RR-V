@@ -16,6 +16,7 @@ from services.partial_download_cleanup import (
     partial_cleanup_scan_diagnostics,
     should_offer_partial_cleanup,
 )
+from services.ytdlp_service import YtDlpService
 from ui.dialogs.warm_dialogs import ask_warm_question
 from ui.pages.download_page import DownloadPage as _BaseDownloadPage
 from ui.widgets.chapter_preview_panel import PreviewPanel
@@ -25,7 +26,7 @@ _PARTIAL_CLEANUP_RETRY_DELAYS_MS = (0, 250, 500, 750)
 
 
 class DownloadPage(_BaseDownloadPage):
-    """기존 DownloadPage에 1.4 챕터 저장 UX와 안전한 정리 동작을 얹는다."""
+    """기존 DownloadPage에 1.4 챕터 UX와 안전한 정리 동작을 얹는다."""
 
     def __init__(self) -> None:
         self._pending_partial_cleanup: dict[str, DownloadTask] = {}
@@ -70,6 +71,11 @@ class DownloadPage(_BaseDownloadPage):
             task.split_chapters = bool(
                 preferences.split_chapters and not task.audio_only
             )
+            task.sponsorblock_chapters = bool(
+                preferences.sponsorblock_chapters
+                and not task.audio_only
+                and YtDlpService.is_youtube_url(task.url)
+            )
             task.delete_original_after_split = bool(
                 task.split_chapters
                 and load_delete_original_after_split(preferences.preset_id)
@@ -91,6 +97,11 @@ class DownloadPage(_BaseDownloadPage):
             task.split_chapters = bool(
                 preferences.split_chapters and not task.audio_only
             )
+            task.sponsorblock_chapters = bool(
+                preferences.sponsorblock_chapters
+                and not task.audio_only
+                and YtDlpService.is_youtube_url(task.url)
+            )
             task.delete_original_after_split = bool(
                 task.split_chapters
                 and load_delete_original_after_split(preferences.preset_id)
@@ -105,11 +116,15 @@ class DownloadPage(_BaseDownloadPage):
         try:
             options = self.preview_panel.selected_options()
             desired_split = bool(options.get("split_chapters", False))
+            desired_sponsorblock = bool(
+                options.get("sponsorblock_chapters", False)
+            )
             desired_delete = bool(
                 desired_split and options.get("delete_original_after_split", False)
             )
         except Exception:
             desired_split = False
+            desired_sponsorblock = False
             desired_delete = False
 
         super()._create_task_from_preview(start_immediately)
@@ -122,6 +137,11 @@ class DownloadPage(_BaseDownloadPage):
             return
 
         created.split_chapters = bool(desired_split and not created.audio_only)
+        created.sponsorblock_chapters = bool(
+            desired_sponsorblock
+            and not created.audio_only
+            and YtDlpService.is_youtube_url(created.url)
+        )
         created.delete_original_after_split = bool(
             created.split_chapters and desired_delete
         )
