@@ -20,6 +20,9 @@ from ui.pages.download_page import DownloadPage as _BaseDownloadPage
 from ui.widgets.chapter_preview_panel import PreviewPanel
 
 
+_PARTIAL_CLEANUP_RETRY_DELAYS_MS = (0, 250, 500, 750)
+
+
 class DownloadPage(_BaseDownloadPage):
     """기존 DownloadPage에 1.4 챕터 저장 UX와 안전한 정리 동작을 얹는다."""
 
@@ -217,23 +220,88 @@ class DownloadPage(_BaseDownloadPage):
         super()._task_removed(task_id)
 
         if cleanup_now is not None:
-            self._report_partial_cleanup(
-                cleanup_now.task_id,
-                cleanup_partial_download_files(cleanup_now),
+            # 다이얼로그가 닫힌 뒤 이벤트 루프로 돌아가서 정리를 시작한다.
+            QTimer.singleShot(
+                0,
+                lambda task=cleanup_now: self._start_partial_cleanup(task),
             )
 
     def _download_finished(self, task_id: str) -> None:
         super()._download_finished(task_id)
         task = self._pending_partial_cleanup.pop(task_id, None)
         if task is not None:
-            # Windows에서 종료 직후 파일 핸들이 정리되는 짧은 틈까지 피한다.
+            # Windows에서 프로세스 종료 직후 파일 핸들이 풀리는 짧은 틈을 피한다.
             QTimer.singleShot(
                 120,
-                lambda task=task: self._report_partial_cleanup(
-                    task.task_id,
-                    cleanup_partial_download_files(task),
+                lambda task=task: self._start_partial_cleanup(task),
+            )
+
+    def _start_partial_cleanup(self, task: DownloadTask) -> None:
+        self._attempt_partial_cleanup(
+            task,
+            attempt=0,
+            deleted=(),
+            unresolved_failed=(),
+        )
+
+    def _attempt_partial_cleanup(
+        self,
+        task: DownloadTask,
+        *,
+        attempt: int,
+        deleted: tuple[str, ...],
+        unresolved_failed: tuple[str, ...],
+    ) -> None:
+        result = cleanup_partial_download_files(task)
+        deleted_now = tuple(dict.fromkeys((*deleted, *result.deleted)))
+
+        still_failed = [
+            path
+            for path in unresolved_failed
+            if path not in deleted_now and Path(path).exists()
+        ]
+        for path in result.failed:
+            if path not in deleted_now and path not in still_failed:
+                still_failed.append(path)
+        unresolved_now = tuple(still_failed)
+
+        no_match_yet = not deleted_now and not unresolved_now
+        retry_needed = bool(unresolved_now or no_match_yet)
+        next_attempt = attempt + 1
+        can_retry = next_attempt < len(_PARTIAL_CLEANUP_RETRY_DELAYS_MS)
+
+        if retry_needed and can_retry:
+            delay_ms = _PARTIAL_CLEANUP_RETRY_DELAYS_MS[next_attempt]
+            write_download_event(
+                "download.partial_cleanup_retry",
+                task_id=task.task_id,
+                attempt=next_attempt + 1,
+                delay_ms=delay_ms,
+                deleted=len(deleted_now),
+                unresolved=len(unresolved_now),
+            )
+            QTimer.singleShot(
+                delay_ms,
+                lambda task=task, attempt=next_attempt, deleted=deleted_now,
+                unresolved=unresolved_now: self._attempt_partial_cleanup(
+                    task,
+                    attempt=attempt,
+                    deleted=deleted,
+                    unresolved_failed=unresolved,
                 ),
             )
+            return
+
+        final_failed = tuple(
+            path for path in unresolved_now if Path(path).exists()
+        )
+        self._report_partial_cleanup(
+            task.task_id,
+            PartialCleanupResult(
+                deleted=deleted_now,
+                failed=final_failed,
+            ),
+        )
 
     def _report_partial_cleanup(
         self,
