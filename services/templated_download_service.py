@@ -121,11 +121,37 @@ class YtDlpDownloadService(_BaseDownloadService):
             chapter_count=split_result.count,
             output_directory=split_result.output_directory,
         )
-        on_phase(
-            "postprocessing",
-            f"챕터별 파일 저장 완료 · {split_result.count}개",
-        )
-        return result
+
+        completion_message = f"챕터별 파일 저장 완료 · {split_result.count}개"
+        completion_result = result
+        if task.delete_original_after_split:
+            try:
+                output_path.unlink(missing_ok=True)
+            except OSError as error:
+                write_download_event(
+                    "download.chapter_original_delete_failed",
+                    task_id=task.task_id,
+                    output=output_path,
+                    error=str(error),
+                )
+                completion_message += " · 원본 삭제 실패"
+            else:
+                write_download_event(
+                    "download.chapter_original_deleted",
+                    task_id=task.task_id,
+                    output=output_path,
+                )
+                completion_message += " · 원본 삭제"
+                # 완료 카드가 존재하지 않는 원본을 가리키지 않도록 첫 챕터를
+                # 대표 완료 파일로 사용한다. 전체 결과는 같은 _chapters 폴더에 있다.
+                if split_result.output_files:
+                    completion_result = DownloadResult(
+                        output_file=split_result.output_files[0],
+                        raw_log_path=result.raw_log_path,
+                    )
+
+        on_phase("postprocessing", completion_message)
+        return completion_result
 
     def cancel(self) -> None:
         # 다운로드 중지 버튼 하나로 현재 단계가 yt-dlp이든 FFprobe/FFmpeg 후처리든
@@ -137,6 +163,7 @@ class YtDlpDownloadService(_BaseDownloadService):
     def _resolve_chapter_split_intent(self, task: DownloadTask) -> bool:
         if task.audio_only:
             task.split_chapters = False
+            task.delete_original_after_split = False
             return False
         if task.split_chapters:
             return True
@@ -148,6 +175,8 @@ class YtDlpDownloadService(_BaseDownloadService):
         except Exception:
             preset = None
         task.split_chapters = bool(preset and preset.split_chapters)
+        if not task.split_chapters:
+            task.delete_original_after_split = False
         return task.split_chapters
 
     def _media_info_for_chapter_split(
