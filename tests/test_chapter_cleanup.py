@@ -9,6 +9,7 @@ from core.download_task import DownloadStatus, DownloadTask
 from services.partial_download_cleanup import (
     cleanup_partial_download_files,
     find_partial_download_files,
+    should_offer_partial_cleanup,
 )
 
 
@@ -78,6 +79,48 @@ class PartialDownloadCleanupTests(unittest.TestCase):
             self.assertEqual(find_partial_download_files(task), ())
             self.assertTrue(partial.exists())
 
+    def test_stopped_download_activity_offers_cleanup_without_predetected_file(self) -> None:
+        task = DownloadTask(
+            task_id="stopped",
+            title="sample",
+            url="https://example.invalid/video",
+            status=DownloadStatus.STOPPED,
+            downloaded_bytes=1024,
+        )
+
+        self.assertTrue(
+            should_offer_partial_cleanup(
+                task,
+                active=False,
+                detected_count=0,
+            )
+        )
+
+    def test_task_log_can_recover_partial_when_stem_does_not_match(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            partial = root / "actual yt-dlp name.f299.mp4.part"
+            unrelated = root / "other download.f299.mp4.part"
+            partial.write_bytes(b"partial")
+            unrelated.write_bytes(b"other")
+
+            log_path = root / "task.log"
+            log_path.write_text(
+                "[download] Destination: "
+                + str(root / "actual yt-dlp name.f299.mp4")
+                + "\n",
+                encoding="utf-8",
+            )
+
+            task = self._task(directory)
+            task.output_stem = "RR-V expected name"
+            task.raw_log_path = str(log_path)
+
+            names = {path.name for path in find_partial_download_files(task)}
+
+            self.assertEqual(names, {partial.name})
+            self.assertTrue(unrelated.exists())
+
 
 class ChapterOriginalDeletionContractTests(unittest.TestCase):
     def test_card_meta_shows_original_delete_only_with_chapter_split(self) -> None:
@@ -132,6 +175,7 @@ class ChapterOriginalDeletionContractTests(unittest.TestCase):
 
         self.assertIn("_pending_partial_cleanup", source)
         self.assertIn("미완성 다운로드 파일 정리", source)
+        self.assertIn("should_offer_partial_cleanup", source)
         self.assertIn("QTimer.singleShot", source)
         self.assertIn("cleanup_partial_download_files", source)
 
