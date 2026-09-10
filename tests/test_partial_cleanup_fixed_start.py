@@ -219,7 +219,9 @@ class PartialCleanupFixedStartTests(unittest.TestCase):
             self.assertIn(str(subtitle), result.deleted)
             self.assertFalse(subtitle.exists())
             self.assertTrue(unrelated.exists())
-            self.assertNotIn(unrelated.name, diagnostics)
+            self.assertIn(unrelated.name, diagnostics)
+            self.assertIn("kind=subtitle;candidate=0", diagnostics)
+            self.assertIn("eligible=1;session=0", diagnostics)
 
     def test_download_controller_records_start_time_before_worker_runs(self) -> None:
         path = ROOT / "controllers" / "download_controller.py"
