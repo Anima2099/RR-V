@@ -2,18 +2,68 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from PySide6.QtWidgets import QCheckBox
+from PySide6.QtWidgets import QCheckBox, QLabel
 
 from app.chapter_preferences import (
     load_delete_original_after_split,
     save_delete_original_after_split,
 )
 from app.download_preferences import DownloadPreferences
+from app.general_preferences import save_general_preferences
 from ui.pages.unified_settings_page import UnifiedSettingsPage as _BaseSettingsPage
+from ui.widgets.common import create_card
 
 
 class UnifiedSettingsPage(_BaseSettingsPage):
-    """1.4 챕터 관련 다운로드 옵션을 설정 화면에 추가한다."""
+    """1.4 챕터와 빠른 추가 관련 다운로드 옵션을 설정 화면에 추가한다."""
+
+    def _create_preset_tab(self):  # type: ignore[no-untyped-def]
+        # 빠른 추가 자동 다운로드는 프리셋 값이 아니라 RR-V 전체 동작 설정이다.
+        # 기존 다운로드 설정 구성은 유지하면서 별도 카드로 명확히 분리한다.
+        return self._create_scroll_page(
+            [
+                self._create_download_folder_card(),
+                self._create_filename_template_card(),
+                self._create_file_collision_card(),
+                self._create_quick_add_behavior_card(),
+                self._create_download_common_save_bar(),
+                self._create_download_preferences_card(),
+            ]
+        )
+
+    def _create_quick_add_behavior_card(self):  # type: ignore[no-untyped-def]
+        card, layout = create_card()
+
+        title = QLabel("빠른 추가")
+        title.setObjectName("sectionTitle")
+
+        description = QLabel(
+            "빠른 추가는 기본 프리셋으로 영상 정보를 확인한 뒤 다운로드 목록에 넣습니다. "
+            "자동 다운로드를 켜면 정보 확인이 끝난 뒤 기존 순차 대기열을 자동으로 시작합니다."
+        )
+        description.setObjectName("bodyText")
+        description.setWordWrap(True)
+
+        self.quick_add_auto_download_checkbox = QCheckBox(
+            "빠른 추가 후 자동으로 다운로드 시작"
+        )
+        self.quick_add_auto_download_checkbox.setObjectName("settingsCheckbox")
+        self.quick_add_auto_download_checkbox.setChecked(
+            self._general_preferences.quick_add_auto_download
+        )
+
+        hint = QLabel(
+            "기본값은 꺼짐입니다. 이미 다운로드 중이거나 먼저 대기 중인 작업이 있으면 "
+            "병렬 실행이나 새치기 없이 기존 목록 순서대로 이어서 다운로드합니다."
+        )
+        hint.setObjectName("mutedText")
+        hint.setWordWrap(True)
+
+        layout.addWidget(title)
+        layout.addWidget(description)
+        layout.addWidget(self.quick_add_auto_download_checkbox)
+        layout.addWidget(hint)
+        return card
 
     def _create_download_preferences_card(self):  # type: ignore[no-untyped-def]
         card = super()._create_download_preferences_card()
@@ -150,6 +200,32 @@ class UnifiedSettingsPage(_BaseSettingsPage):
                 self.sponsorblock_chapters_checkbox.setChecked(False)
             finally:
                 self.sponsorblock_chapters_checkbox.blockSignals(False)
+
+    def _apply_general_preferences_to_controls(self) -> None:
+        super()._apply_general_preferences_to_controls()
+        if hasattr(self, "quick_add_auto_download_checkbox"):
+            self.quick_add_auto_download_checkbox.setChecked(
+                self._general_preferences.quick_add_auto_download
+            )
+
+    def _save_download_settings(self) -> None:
+        desired_quick_auto = bool(
+            hasattr(self, "quick_add_auto_download_checkbox")
+            and self.quick_add_auto_download_checkbox.isChecked()
+        )
+        super()._save_download_settings()
+
+        # 파일명 템플릿 검증 등에 실패했다면 부모 저장도 중단된 상태다. 이때
+        # 빠른 추가 옵션만 따로 저장되는 반쪽 상태를 만들지 않는다.
+        if self.download_settings_save_status.text() != "공통 다운로드 설정이 저장되었습니다.":
+            return
+
+        preferences = replace(
+            self._general_preferences,
+            quick_add_auto_download=desired_quick_auto,
+        )
+        save_general_preferences(preferences)
+        self._general_preferences = preferences
 
     def _save_preferences(self) -> None:
         preset = self._current_preset()
