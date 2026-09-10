@@ -106,3 +106,27 @@ class DownloadTask:
             if self.delete_original_after_split:
                 items.append("원본 삭제")
         return " · ".join(item for item in items if item)
+
+
+def remove_failed_tasks(
+    tasks: list[DownloadTask],
+) -> tuple[list[DownloadTask], list[str]]:
+    """실패 상태의 작업만 목록에서 골라낸다.
+
+    실제 다운로드 파일은 건드리지 않고, UI/큐 목록에서 제거할 task id만 반환한다.
+    입력 리스트 자체는 수정하지 않는다.
+    """
+
+    failed_ids = [
+        task.task_id
+        for task in tasks
+        if task.status is DownloadStatus.FAILED
+    ]
+    if not failed_ids:
+        return list(tasks), []
+
+    failed_set = set(failed_ids)
+    remaining_tasks = [
+        task for task in tasks if task.task_id not in failed_set
+    ]
+    return remaining_tasks, failed_ids
