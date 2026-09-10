@@ -186,6 +186,7 @@ def _task_from_dict(raw: dict[str, object]) -> DownloadTask | None:
         audio_quality=str(raw.get("audio_quality", "최고")),
         preserve_metadata=bool(raw.get("preserve_metadata", True)),
         split_chapters=bool(raw.get("split_chapters", False)),
+        sponsorblock_chapters=bool(raw.get("sponsorblock_chapters", False)),
         delete_original_after_split=bool(
             raw.get("delete_original_after_split", False)
         ),
