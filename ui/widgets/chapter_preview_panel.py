@@ -1,0 +1,140 @@
+from __future__ import annotations
+
+from dataclasses import replace
+
+from PySide6.QtWidgets import QCheckBox, QHBoxLayout
+
+from app.download_preferences import DownloadPreferences
+from app.preset_store import save_preset_library
+from ui.widgets.preview_panel import PreviewPanel as _BasePreviewPanel
+
+
+class PreviewPanel(_BasePreviewPanel):
+    """1.4 챕터 저장 옵션을 기존 영상 정보 편집 패널에 덧붙인다.
+
+    프리셋 값은 초기값으로만 사용하고, 여기서 체크를 바꾸면 현재 영상에만
+    적용된다. 사용자가 '프리셋으로 저장'을 눌렀을 때만 새 프리셋에 반영한다.
+    """
+
+    def _create_settings_frame(self):  # type: ignore[no-untyped-def]
+        frame = super()._create_settings_frame()
+
+        self.split_chapters_checkbox = QCheckBox("챕터별 파일 저장")
+        self.split_chapters_checkbox.setObjectName("previewCheckBox")
+        self.split_chapters_checkbox.setToolTip(
+            "다운로드가 끝난 뒤 영상의 챕터를 각각 별도 파일로 저장합니다."
+        )
+
+        root_layout = frame.layout()
+        thumbnail_row = None
+        if root_layout is not None and root_layout.count():
+            thumbnail_row = root_layout.itemAt(root_layout.count() - 1).layout()
+
+        if thumbnail_row is not None and hasattr(thumbnail_row, "insertWidget"):
+            # 썸네일 옵션 두 개 뒤, 기존 stretch 앞에 배치한다.
+            thumbnail_row.insertWidget(
+                max(0, thumbnail_row.count() - 1),
+                self.split_chapters_checkbox,
+            )
+        elif root_layout is not None:
+            row = QHBoxLayout()
+            row.setSpacing(18)
+            row.addWidget(self.split_chapters_checkbox)
+            row.addStretch()
+            root_layout.addLayout(row)
+
+        return frame
+
+    def _connect_option_signals(self) -> None:
+        super()._connect_option_signals()
+        self.split_chapters_checkbox.toggled.connect(self._option_changed)
+
+    def selected_options(self) -> dict[str, object]:
+        options = super().selected_options()
+        options["split_chapters"] = bool(
+            self.split_chapters_checkbox.isChecked()
+            and not self.audio_only_checkbox.isChecked()
+        )
+        return options
+
+    def _apply_preferences(self, preferences: DownloadPreferences) -> None:
+        super()._apply_preferences(preferences)
+
+        self.split_chapters_checkbox.blockSignals(True)
+        try:
+            self.split_chapters_checkbox.setChecked(
+                bool(preferences.split_chapters and not preferences.audio_only)
+            )
+        finally:
+            self.split_chapters_checkbox.blockSignals(False)
+
+        self.split_chapters_checkbox.setEnabled(not preferences.audio_only)
+        self._update_settings_summary()
+
+    def _audio_only_changed(self, checked: bool) -> None:
+        super()._audio_only_changed(checked)
+        if not hasattr(self, "split_chapters_checkbox"):
+            return
+
+        self.split_chapters_checkbox.setEnabled(not checked)
+        if checked and self.split_chapters_checkbox.isChecked():
+            self.split_chapters_checkbox.blockSignals(True)
+            try:
+                self.split_chapters_checkbox.setChecked(False)
+            finally:
+                self.split_chapters_checkbox.blockSignals(False)
+        self._update_settings_summary()
+
+    def _update_settings_summary(self) -> None:
+        super()._update_settings_summary()
+        if not hasattr(self, "split_chapters_checkbox"):
+            return
+        if (
+            self.split_chapters_checkbox.isChecked()
+            and not self.audio_only_checkbox.isChecked()
+        ):
+            current = self.settings_summary.text().strip()
+            self.settings_summary.setText(
+                f"{current} · 챕터별 저장" if current else "챕터별 저장"
+            )
+
+    def _save_current_as_preset(self) -> None:
+        desired_split = bool(
+            self.split_chapters_checkbox.isChecked()
+            and not self.audio_only_checkbox.isChecked()
+        )
+        before_ids = {preset.preset_id for preset in self._preset_library.presets}
+
+        super()._save_current_as_preset()
+
+        created = next(
+            (
+                preset
+                for preset in self._preset_library.presets
+                if preset.preset_id not in before_ids
+            ),
+            None,
+        )
+        if created is None:
+            return
+
+        preferences = replace(
+            created.to_preferences(),
+            split_chapters=desired_split,
+        ).normalized()
+        replacement = created.with_preferences(preferences)
+        try:
+            self._preset_library.replace_preset(created.preset_id, replacement)
+            save_preset_library(self._preset_library)
+        except (OSError, ValueError, KeyError):
+            # 기반 저장은 이미 성공한 상태다. 여기서 추가 옵션 보존만 실패했을 때
+            # 기존 프리셋을 깨뜨리지 않고 다음 저장 기회에 맡긴다.
+            return
+
+        self._refresh_preset_combo(replacement.preset_id)
+        self._select_default_subtitles(replacement.to_preferences())
+        self._apply_preferences(replacement.to_preferences())
+        self.preset_status_label.setText("저장됨")
+
+
+__all__ = ["PreviewPanel"]
