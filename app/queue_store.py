@@ -206,6 +206,9 @@ def _task_from_dict(raw: dict[str, object]) -> DownloadTask | None:
             str(raw.get("output_file", "")),
         ),
         raw_log_path=str(raw.get("raw_log_path", "")),
+        download_started_at=_safe_nonnegative_float(
+            raw.get("download_started_at", 0.0)
+        ),
         process_id=0,
         phase_message=str(raw.get("phase_message", "")),
         error_message=str(raw.get("error_message", "")),
@@ -249,6 +252,13 @@ def _safe_nonnegative_int(value: object) -> int:
         return max(0, int(value))
     except (TypeError, ValueError, OverflowError):
         return 0
+
+
+def _safe_nonnegative_float(value: object) -> float:
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
 
 
 def _thumbnail_name(task_id: str) -> str:
