@@ -37,6 +37,7 @@ class DownloadPreset:
     save_thumbnail: bool = False
     preserve_metadata: bool = True
     split_chapters: bool = False
+    sponsorblock_chapters: bool = False
     audio_only: bool = False
     audio_format: str = "M4A"
     audio_quality: str = "최고"
@@ -64,6 +65,9 @@ class DownloadPreset:
             save_thumbnail=p.save_thumbnail,
             preserve_metadata=p.preserve_metadata,
             split_chapters=p.split_chapters and not p.audio_only,
+            sponsorblock_chapters=(
+                p.sponsorblock_chapters and not p.audio_only
+            ),
             audio_only=p.audio_only,
             audio_format=p.audio_format,
             audio_quality=p.audio_quality,
@@ -84,6 +88,7 @@ class DownloadPreset:
             save_thumbnail=self.save_thumbnail,
             preserve_metadata=self.preserve_metadata,
             split_chapters=self.split_chapters,
+            sponsorblock_chapters=self.sponsorblock_chapters,
             audio_only=self.audio_only,
             audio_format=self.audio_format,
             audio_quality=self.audio_quality,
@@ -155,6 +160,7 @@ class DownloadPreset:
             save_thumbnail=bool_value("save_thumbnail", False),
             preserve_metadata=bool_value("preserve_metadata", True),
             split_chapters=bool_value("split_chapters", False),
+            sponsorblock_chapters=bool_value("sponsorblock_chapters", False),
             audio_only=bool_value("audio_only", False),
             audio_format=str(raw.get("audio_format", "M4A")),
             audio_quality=str(raw.get("audio_quality", "최고")),
