@@ -358,8 +358,8 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
   begin
-    ; 새 파일을 넣기 전의 RR-V.exe 존재 여부를 기억한다. 사용자가 기존 설치와
-    ; 무관한 다른 폴더를 직접 선택한 경우 그 폴더의 임의 파일을 정리하지 않는다.
+    // 새 파일을 넣기 전의 RR-V.exe 존재 여부를 기억한다. 사용자가 기존 설치와
+    // 무관한 다른 폴더를 직접 선택한 경우 그 폴더의 임의 파일을 정리하지 않는다.
     CleanPreviousAppPayload := PreviousInstallDetected and
       FileExists(ExpandConstant('{app}\RR-V.exe'));
     ResetUserDataOnUpgrade := PreviousInstallDetected and
