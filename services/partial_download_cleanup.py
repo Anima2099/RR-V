@@ -57,12 +57,13 @@ def should_offer_partial_cleanup(
 
 
 def find_partial_download_files(task: DownloadTask) -> tuple[Path, ...]:
-    """현재 작업이 만든 것으로 확인되는 yt-dlp 미완성 파일만 찾는다.
+    """현재 작업이 만든 것으로 확인되는 yt-dlp 미완성 산출물만 찾는다.
 
-    먼저 RR-V의 output_stem과 정확히 맞는 파일을 찾고, 그게 안 되면 해당 작업의
-    raw log와 파일명 유사도/수정 시각을 함께 사용한다. 후자의 보완 경로는 실제로
-    다운로드된 바이트가 있는 작업에만 허용해 오래된 다른 .part를 잘못 지우는 것을
-    피한다. 완성 영상/자막/썸네일은 후보에 넣지 않는다.
+    .part/.ytdl은 기존처럼 output_stem, 작업 로그, 현재 세션의 파일명/시각을
+    교차 확인한다. 썸네일 내장/별도 저장 과정에서 중지 때문에 남은 WEBP/PNG/JPG
+    같은 이미지도 현재 작업에서 생성된 것이 확인되는 경우에만 정리 후보에 넣는다.
+    단, 사용자가 '썸네일 JPG 별도 저장'을 선택했다면 완성 JPG/JPEG는 결과물로
+    간주해 보존한다. 완성 영상과 자막 파일도 후보에 넣지 않는다.
     """
 
     directory = Path(task.save_path).expanduser()
@@ -82,7 +83,7 @@ def find_partial_download_files(task: DownloadTask) -> tuple[Path, ...]:
         return ()
 
     for path in entries:
-        if not path.is_file() or not _is_incomplete_name(path.name):
+        if not path.is_file():
             continue
 
         name_key = _text_key(path.name)
@@ -94,13 +95,27 @@ def find_partial_download_files(task: DownloadTask) -> tuple[Path, ...]:
                 for probe in _candidate_log_probes(path.name)
             )
         )
-        session_match = _matches_current_download_session(
-            task,
+
+        if _is_incomplete_name(path.name):
+            session_match = _matches_current_download_session(
+                task,
+                path,
+                stem_identity=stem_identity,
+                log_started_at=log_started_at,
+            )
+            if stem_match or log_match or session_match:
+                candidates.append(path)
+            continue
+
+        if not _is_temporary_thumbnail_name(task, path.name):
+            continue
+
+        if _matches_current_thumbnail_artifact(
             path,
-            stem_identity=stem_identity,
+            stem_match=stem_match,
+            log_match=log_match,
             log_started_at=log_started_at,
-        )
-        if stem_match or log_match or session_match:
+        ):
             candidates.append(path)
 
     return tuple(sorted(candidates, key=lambda item: item.name.casefold()))
@@ -128,6 +143,41 @@ def _is_incomplete_name(name: str) -> bool:
         or ".part-frag" in lowered
         or lowered.endswith(".ytdl")
     )
+
+
+def _is_temporary_thumbnail_name(task: DownloadTask, name: str) -> bool:
+    if not (task.embed_thumbnail or task.save_thumbnail):
+        return False
+
+    suffix = Path(name).suffix.casefold()
+    if suffix not in {".webp", ".png", ".jpg", ".jpeg", ".avif"}:
+        return False
+
+    # UI의 '썸네일 JPG 별도 저장'은 최종 JPG 결과를 명시적으로 요청한 것이다.
+    # 중지 시 원본 WEBP/PNG가 남았다면 정리하되 완성 JPG/JPEG는 보존한다.
+    if task.save_thumbnail and suffix in {".jpg", ".jpeg"}:
+        return False
+    return True
+
+
+def _matches_current_thumbnail_artifact(
+    path: Path,
+    *,
+    stem_match: bool,
+    log_match: bool,
+    log_started_at: float | None,
+) -> bool:
+    """현재 다운로드가 만든 썸네일 임시 산출물인지 보수적으로 확인한다."""
+
+    if log_match:
+        return True
+    if not stem_match or log_started_at is None:
+        return False
+    try:
+        modified_at = path.stat().st_mtime
+    except OSError:
+        return False
+    return modified_at >= log_started_at - 5.0
 
 
 def _candidate_log_probes(name: str) -> tuple[str, ...]:
