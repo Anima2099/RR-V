@@ -10,6 +10,7 @@ from app.app_update import (
     check_app_update,
     release_notes_preview,
 )
+from app.constants import APP_VERSION
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,14 +61,22 @@ class ReleaseNotesPreviewTests(unittest.TestCase):
 
     @patch("app.app_update.fetch_https_bytes")
     def test_update_result_carries_selected_release_notes(self, fetch) -> None:  # type: ignore[no-untyped-def]
+        major, minor, patch_number = (int(part) for part in APP_VERSION.split("."))
+        newer_version = f"{major}.{minor}.{patch_number + 1}"
         payload = [
             {
-                "tag_name": "v1.4.0-community-beta",
+                "tag_name": f"v{newer_version}-community-beta",
                 "prerelease": True,
                 "draft": False,
-                "html_url": "https://github.com/Anima2099/RR-V/releases/tag/v1.4.0-community-beta",
+                "html_url": (
+                    "https://github.com/Anima2099/RR-V/releases/tag/"
+                    f"v{newer_version}-community-beta"
+                ),
                 "assets": [],
-                "body": "# RR-V 1.4.0\n\n## 주요 변경사항\n- Release Notes 미리보기 추가",
+                "body": (
+                    f"# RR-V {newer_version}\n\n"
+                    "## 주요 변경사항\n- Release Notes 미리보기 추가"
+                ),
             }
         ]
         fetch.return_value = json.dumps(payload).encode("utf-8")
