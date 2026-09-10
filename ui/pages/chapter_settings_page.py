@@ -141,10 +141,20 @@ class UnifiedSettingsPage(_BaseSettingsPage):
         )
         if created is None:
             return
-        save_delete_original_after_split(
-            created.preset_id,
-            bool(desired_delete and created.split_chapters and not created.audio_only),
+        persisted = bool(
+            desired_delete and created.split_chapters and not created.audio_only
         )
+        save_delete_original_after_split(created.preset_id, persisted)
+
+        # base 구현이 새 프리셋을 선택하면서 companion 값이 저장되기 전에 한 번
+        # 컨트롤을 갱신하므로, 저장 직후 현재 화면도 같은 값으로 맞춘다.
+        if self._current_preset().preset_id == created.preset_id:
+            self.delete_original_after_split_checkbox.blockSignals(True)
+            try:
+                self.delete_original_after_split_checkbox.setChecked(persisted)
+            finally:
+                self.delete_original_after_split_checkbox.blockSignals(False)
+            self._sync_chapter_delete_control()
 
 
 __all__ = ["UnifiedSettingsPage"]
