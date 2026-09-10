@@ -7,6 +7,23 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PAGE = ROOT / "ui" / "pages" / "unified_settings_page.py"
+RUNTIME_PAGE = ROOT / "ui" / "pages" / "chapter_settings_page.py"
+
+
+def _class_method_source(path: Path, class_name: str, method_name: str) -> str:
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(path))
+    page_class = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == class_name
+    )
+    method = next(
+        node
+        for node in page_class.body
+        if isinstance(node, ast.FunctionDef) and node.name == method_name
+    )
+    return ast.get_source_segment(source, method) or ""
 
 
 class DownloadSettingsLayoutTests(unittest.TestCase):
@@ -108,6 +125,64 @@ class DownloadSettingsLayoutTests(unittest.TestCase):
         self.assertTrue(
             any("공백이나 -, _, [ ], ( )" in value for value in strings)
         )
+
+
+class RuntimeDownloadSettingsSubtabTests(unittest.TestCase):
+    def test_runtime_download_settings_has_two_exclusive_subtabs(self) -> None:
+        method = _class_method_source(
+            RUNTIME_PAGE,
+            "UnifiedSettingsPage",
+            "_create_preset_tab",
+        )
+        self.assertIn('("공통 설정", "다운로드 프리셋")', method)
+        self.assertIn("QButtonGroup(self)", method)
+        self.assertIn("setExclusive(True)", method)
+        self.assertIn("QStackedWidget()", method)
+
+    def test_common_subtab_card_order_matches_ui_contract(self) -> None:
+        method = _class_method_source(
+            RUNTIME_PAGE,
+            "UnifiedSettingsPage",
+            "_create_preset_tab",
+        )
+        calls = (
+            "_create_download_folder_card()",
+            "_create_quick_add_behavior_card()",
+            "_create_file_collision_card()",
+            "_create_filename_template_card()",
+            "_create_download_common_save_bar()",
+        )
+        positions = [method.index(call) for call in calls]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_preset_editor_is_isolated_on_second_subtab(self) -> None:
+        method = _class_method_source(
+            RUNTIME_PAGE,
+            "UnifiedSettingsPage",
+            "_create_preset_tab",
+        )
+        common_start = method.index("common_page =")
+        preset_start = method.index("preset_page =")
+        preset_card = method.index("_create_download_preferences_card()")
+        self.assertLess(common_start, preset_start)
+        self.assertGreater(preset_card, preset_start)
+
+    def test_common_subtab_is_default_and_invalid_index_falls_back_to_it(self) -> None:
+        create_method = _class_method_source(
+            RUNTIME_PAGE,
+            "UnifiedSettingsPage",
+            "_create_preset_tab",
+        )
+        show_method = _class_method_source(
+            RUNTIME_PAGE,
+            "UnifiedSettingsPage",
+            "_show_download_settings_subtab",
+        )
+        self.assertIn("download_settings_subtab_buttons[0].setChecked(True)", create_method)
+        self.assertIn("download_settings_substack.setCurrentIndex(0)", create_method)
+        self.assertIn("if index < 0 or index >= self.download_settings_substack.count():", show_method)
+        self.assertIn("index = 0", show_method)
+        self.assertIn("setCurrentIndex(index)", show_method)
 
 
 if __name__ == "__main__":
