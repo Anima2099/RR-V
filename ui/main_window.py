@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.app_update import release_notes_preview
 from app.general_preferences import load_general_preferences
 from app.performance_log import write_performance
 from app.settings_store import get_settings
@@ -159,16 +160,28 @@ class MainWindow(QMainWindow):
 
         message = str(getattr(result, "message", "새 RR-V 버전을 사용할 수 있습니다."))
         installer = getattr(result, "installer", None)
+        release_notes = release_notes_preview(
+            getattr(result, "release_notes", ""),
+            max_lines=7,
+            max_chars=650,
+        )
+        notes_detail = (
+            f"\n\n이번 업데이트\n{release_notes}"
+            if release_notes
+            else ""
+        )
         if self.isVisible():
             if installer is not None:
                 detail = (
                     message
+                    + notes_detail
                     + "\n\n인스톨러를 다운로드하고 필수 검증을 완료한 뒤\n자동으로 RR-V를 종료하고 설치 프로그램을 실행합니다."
                 )
                 yes_text = "업데이트"
             else:
                 detail = (
                     message
+                    + notes_detail
                     + "\n\n자동 설치용 검증 정보를 확인하지 못해 GitHub 릴리스 페이지를 엽니다."
                 )
                 yes_text = "릴리스 페이지"
