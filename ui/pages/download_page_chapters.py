@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
@@ -137,13 +139,31 @@ class DownloadPage(_BaseDownloadPage):
         super()._download_succeeded(task_id, output_file, raw_log_path)
 
         task = self._task_by_id(task_id)
-        if (
-            task is not None
-            and chapter_completion.startswith("챕터")
-        ):
+        if task is None:
+            return
+
+        if chapter_completion.startswith("챕터"):
             task.phase_message = chapter_completion
-            self.task_list.refresh_task_status(task_id)
-            self._schedule_queue_save()
+
+        # 원본 삭제 모드에서는 대표 완료 파일이 첫 챕터다. 카드의 파일 크기는
+        # 첫 조각 하나가 아니라 챕터 폴더 전체 결과 용량으로 보여준다.
+        if task.split_chapters and task.delete_original_after_split and output_file:
+            representative = Path(output_file)
+            try:
+                siblings = tuple(
+                    path for path in representative.parent.iterdir() if path.is_file()
+                )
+                total_size = sum(max(0, path.stat().st_size) for path in siblings)
+            except OSError:
+                total_size = 0
+            if total_size > 0:
+                task.file_size_bytes = total_size
+                task.downloaded_bytes = total_size
+                task.total_bytes = total_size
+                task.total_bytes_estimated = False
+
+        self.task_list.refresh_task_status(task_id)
+        self._schedule_queue_save()
 
     def _task_removed(self, task_id: str) -> None:
         task = self._task_by_id(task_id)
