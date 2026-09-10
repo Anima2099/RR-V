@@ -56,6 +56,24 @@ class DownloadPage(_BaseDownloadPage):
             pass
         return task
 
+    def _complete_quick_task(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+        task_id = self._active_quick_task_id
+        super()._complete_quick_task(*args, **kwargs)
+
+        task = self._task_by_id(task_id)
+        if task is None:
+            return
+        try:
+            preferences = load_download_preferences()
+            task.split_chapters = bool(
+                preferences.split_chapters and not task.audio_only
+            )
+            self.task_list.refresh_task(task.task_id)
+            self._schedule_queue_save()
+        except Exception:
+            # 분석 성공 뒤 표시 보강이 실패해도 기존 빠른 추가 흐름은 유지한다.
+            pass
+
     def _create_task_from_preview(self, start_immediately: bool) -> None:
         before_ids = {task.task_id for task in self.tasks}
         try:
