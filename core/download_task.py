@@ -63,6 +63,7 @@ class DownloadTask:
     output_stem: str = ""
     output_file: str = ""
     raw_log_path: str = ""
+    download_started_at: float = 0.0
     process_id: int = 0
     phase_message: str = ""
     error_message: str = ""
