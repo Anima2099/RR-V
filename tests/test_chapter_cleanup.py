@@ -135,6 +135,21 @@ class ChapterOriginalDeletionContractTests(unittest.TestCase):
         self.assertIn("QTimer.singleShot", source)
         self.assertIn("cleanup_partial_download_files", source)
 
+    def test_settings_exposes_safe_default_off_original_delete_choice(self) -> None:
+        settings_path = ROOT / "ui" / "pages" / "chapter_settings_page.py"
+        settings_source = settings_path.read_text(encoding="utf-8")
+        ast.parse(settings_source, filename=str(settings_path))
+        main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+        store_source = (ROOT / "app" / "chapter_preferences.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("분할 성공 후 원본 파일 삭제", settings_source)
+        self.assertIn("load_delete_original_after_split", settings_source)
+        self.assertIn("ChapterSettingsPage", main_source)
+        self.assertIn("value = get_settings().value", store_source)
+        self.assertIn("False)", store_source)
+
 
 if __name__ == "__main__":
     unittest.main()
