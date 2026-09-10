@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 import unicodedata
 
 from core.download_task import DownloadStatus, DownloadTask
@@ -58,9 +59,10 @@ def should_offer_partial_cleanup(
 def find_partial_download_files(task: DownloadTask) -> tuple[Path, ...]:
     """현재 작업이 만든 것으로 확인되는 yt-dlp 미완성 파일만 찾는다.
 
-    1차로 RR-V가 정한 output_stem과 정확히 맞는 파일을 찾고, 중지 시 yt-dlp가
-    파일명을 조금 다르게 만든 경우에는 해당 작업의 raw log에 실제 목적 파일명이
-    기록되어 있는지 교차 확인한다. 완성 영상/자막/썸네일은 후보에 넣지 않는다.
+    먼저 RR-V의 output_stem과 정확히 맞는 파일을 찾고, 그게 안 되면 해당 작업의
+    raw log와 파일명 유사도/수정 시각을 함께 사용한다. 후자의 보완 경로는 실제로
+    다운로드된 바이트가 있는 작업에만 허용해 오래된 다른 .part를 잘못 지우는 것을
+    피한다. 완성 영상/자막/썸네일은 후보에 넣지 않는다.
     """
 
     directory = Path(task.save_path).expanduser()
@@ -69,7 +71,9 @@ def find_partial_download_files(task: DownloadTask) -> tuple[Path, ...]:
 
     stem = str(task.output_stem).strip()
     stem_key = _text_key(stem)
+    stem_identity = _filename_identity(stem)
     log_key = _read_task_log_key(task)
+    log_started_at = _task_log_started_at(task)
 
     candidates: list[Path] = []
     try:
@@ -90,7 +94,13 @@ def find_partial_download_files(task: DownloadTask) -> tuple[Path, ...]:
                 for probe in _candidate_log_probes(path.name)
             )
         )
-        if stem_match or log_match:
+        session_match = _matches_current_download_session(
+            task,
+            path,
+            stem_identity=stem_identity,
+            log_started_at=log_started_at,
+        )
+        if stem_match or log_match or session_match:
             candidates.append(path)
 
     return tuple(sorted(candidates, key=lambda item: item.name.casefold()))
@@ -121,22 +131,88 @@ def _is_incomplete_name(name: str) -> bool:
 
 
 def _candidate_log_probes(name: str) -> tuple[str, ...]:
-    lowered = name.casefold()
-    base = name
-    fragment_index = lowered.find(".part-frag")
-    if fragment_index >= 0:
-        base = name[:fragment_index]
-    elif lowered.endswith(".part"):
-        base = name[:-5]
-    elif lowered.endswith(".ytdl"):
-        base = name[:-5]
-
+    base = _strip_incomplete_suffix(name)
     probes = []
     for value in (name, base):
         key = _text_key(value)
         if key and key not in probes:
             probes.append(key)
     return tuple(probes)
+
+
+def _matches_current_download_session(
+    task: DownloadTask,
+    path: Path,
+    *,
+    stem_identity: str,
+    log_started_at: float | None,
+) -> bool:
+    """정확한 stem 비교가 빗나간 yt-dlp 임시 이름을 보수적으로 보완한다."""
+
+    if task.downloaded_bytes <= 0 or not stem_identity or log_started_at is None:
+        return False
+
+    try:
+        modified_at = path.stat().st_mtime
+    except OSError:
+        return False
+
+    # 작업 로그가 만들어지기 훨씬 전부터 있던 .part는 다른 작업의 찌꺼기로 본다.
+    if modified_at < log_started_at - 5.0:
+        return False
+
+    candidate_identity = _partial_filename_identity(path.name)
+    if not candidate_identity:
+        return False
+
+    left_tokens = stem_identity.split()
+    right_tokens = candidate_identity.split()
+    shared_tokens = 0
+    shared_chars = 0
+    for left, right in zip(left_tokens, right_tokens):
+        if left != right:
+            break
+        shared_tokens += 1
+        shared_chars += len(left)
+
+    shorter_length = min(len(stem_identity), len(candidate_identity))
+    return bool(
+        shared_tokens >= 4
+        and shared_chars >= 24
+        and shorter_length > 0
+        and shared_chars / shorter_length >= 0.45
+    )
+
+
+def _partial_filename_identity(name: str) -> str:
+    base = _strip_incomplete_suffix(name)
+    # yt-dlp의 임시 파일은 stem 뒤에 f299 같은 포맷 ID와 실제 확장자가 붙을 수 있다.
+    base = re.sub(r"\.f\d+(?:-\d+)?$", "", base, flags=re.IGNORECASE)
+    base = re.sub(r"\.[A-Za-z0-9]{2,5}$", "", base)
+    base = re.sub(r"\.f\d+(?:-\d+)?$", "", base, flags=re.IGNORECASE)
+    return _filename_identity(base)
+
+
+def _strip_incomplete_suffix(name: str) -> str:
+    lowered = name.casefold()
+    fragment_index = lowered.find(".part-frag")
+    if fragment_index >= 0:
+        return name[:fragment_index]
+    if lowered.endswith(".part"):
+        return name[:-5]
+    if lowered.endswith(".ytdl"):
+        return name[:-5]
+    return name
+
+
+def _task_log_started_at(task: DownloadTask) -> float | None:
+    raw_path = str(task.raw_log_path).strip()
+    if not raw_path:
+        return None
+    try:
+        return Path(raw_path).stat().st_mtime
+    except OSError:
+        return None
 
 
 def _read_task_log_key(task: DownloadTask) -> str:
@@ -152,6 +228,15 @@ def _read_task_log_key(task: DownloadTask) -> str:
     except OSError:
         return ""
     return _text_key(text[-160000:])
+
+
+def _filename_identity(value: str) -> str:
+    normalized = unicodedata.normalize("NFC", str(value)).casefold()
+    normalized = "".join(
+        character if character.isalnum() else " "
+        for character in normalized
+    )
+    return " ".join(normalized.split())
 
 
 def _text_key(value: str) -> str:
