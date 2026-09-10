@@ -6,6 +6,8 @@ $Root = $PSScriptRoot
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
 $MainSpec = Join-Path $Root "RR-V.spec"
 $HelperSpec = Join-Path $Root "RR-V-Auth-Helper.spec"
+$ConstantsPath = Join-Path $Root "app\constants.py"
+$VersionInfoPath = Join-Path $Root "RR-V.version_info.txt"
 $CoreLicense = Join-Path $Root "LICENSE"
 $CoreLicenseKorean = Join-Path $Root "LICENSE.ko-KR.txt"
 $ThirdPartyNotice = Join-Path $Root "THIRD_PARTY_NOTICES.txt"
@@ -85,6 +87,12 @@ if (-not (Test-Path $MainSpec)) {
 if (-not (Test-Path $HelperSpec)) {
     throw "RR-V-Auth-Helper.spec is missing."
 }
+if (-not (Test-Path $ConstantsPath)) {
+    throw "app\constants.py is missing."
+}
+if (-not (Test-Path $VersionInfoPath)) {
+    throw "RR-V.version_info.txt is missing."
+}
 if (-not (Test-Path $CoreLicense)) {
     throw "RR-V core LICENSE is missing."
 }
@@ -99,6 +107,33 @@ if (-not (Test-Path $SourceOffer)) {
 }
 if (-not (Test-Path $WpcRuntimeDir)) {
     throw "The prepared WPC runtime is missing. Run PREP_WPC_PROVIDER.ps1 first."
+}
+
+$ConstantsText = Get-Content -Path $ConstantsPath -Raw
+$AppVersionMatch = [regex]::Match(
+    $ConstantsText,
+    'APP_VERSION\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"'
+)
+if (-not $AppVersionMatch.Success) {
+    throw "APP_VERSION could not be read from app\constants.py."
+}
+$AppVersion = $AppVersionMatch.Groups[1].Value
+$VersionParts = @($AppVersion.Split('.'))
+if ($VersionParts.Count -ne 3) {
+    throw "APP_VERSION must contain exactly three numeric parts."
+}
+$ExpectedVersionTuple = "($($VersionParts[0]), $($VersionParts[1]), $($VersionParts[2]), 0)"
+$VersionInfoText = Get-Content -Path $VersionInfoPath -Raw
+$RequiredVersionInfoFragments = @(
+    "filevers=$ExpectedVersionTuple",
+    "prodvers=$ExpectedVersionTuple",
+    "StringStruct('FileVersion', '$AppVersion')",
+    "StringStruct('ProductVersion', '$AppVersion')"
+)
+foreach ($Fragment in $RequiredVersionInfoFragments) {
+    if (-not $VersionInfoText.Contains($Fragment)) {
+        throw "RR-V.version_info.txt does not match APP_VERSION $AppVersion. Missing: $Fragment"
+    }
 }
 
 $RunningRRV = @(
@@ -230,7 +265,7 @@ if (-not (Test-Path $NoDriverAgplSource)) {
 Copy-Item -Path $NoDriverAgplSource -Destination $HelperAgplFile -Force
 
 $ManifestLines = @(
-    "RR-V 1.3.0 build license manifest",
+    "RR-V $AppVersion build license manifest",
     "Generated: $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss K'))",
     "Python: $PythonVersion",
     "PySide6 / Qt for Python: $PySideVersion",
@@ -261,7 +296,7 @@ $BundledExternalTools = @(
         ForEach-Object { $_.FullName }
 )
 if ($BundledExternalTools.Count -gt 0) {
-    throw ("External runtime tools must not be bundled in RR-V 1.3.0:`n" + ($BundledExternalTools -join "`n"))
+    throw ("External runtime tools must not be bundled in RR-V $($AppVersion):`n" + ($BundledExternalTools -join "`n"))
 }
 
 # Qt Virtual Keyboard is GPLv3-only in the Qt 6.11 community distribution.
@@ -309,7 +344,7 @@ catch {
 }
 
 Write-Host ""
-Write-Host "RR-V 1.3.0 onedir build is ready."
+Write-Host "RR-V $AppVersion onedir build is ready."
 Write-Host ("Output: " + $MainOutputDir)
 Write-Host "  - RR-V.exe"
 Write-Host "  - RR-V-Auth-Helper.exe"
