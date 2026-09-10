@@ -166,8 +166,217 @@ Name: "{userdesktop}\RR-V"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app
 Filename: "{app}\{#MyAppExeName}"; Description: "RR-V 실행"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+const
+  RRVUninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{A9C3916B-6AA2-4FB8-9BCB-0D5DC6C5D8D4}_is1';
+  InstallManifestName = 'RRV_INSTALL_MANIFEST.txt';
+
 var
   DeleteUserDataOnUninstall: Boolean;
+  PreviousInstallDetected: Boolean;
+  CleanPreviousAppPayload: Boolean;
+  ResetUserDataOnUpgrade: Boolean;
+  UpgradeOptionsPage: TInputOptionWizardPage;
+
+function IsPreviousInstallPresent: Boolean;
+begin
+  Result := RegKeyExists(HKCU, RRVUninstallKey) or
+    FileExists(ExpandConstant('{app}\RR-V.exe'));
+end;
+
+procedure InitializeWizard;
+begin
+  PreviousInstallDetected := IsPreviousInstallPresent;
+  CleanPreviousAppPayload := False;
+  ResetUserDataOnUpgrade := False;
+
+  UpgradeOptionsPage := CreateInputOptionPage(
+    wpSelectDir,
+    'RR-V 업데이트 옵션',
+    '기존 설치를 어떻게 처리할까요?',
+    '기존 RR-V 프로그램 파일은 새 버전 기준으로 정리한 뒤 설치합니다.' + #13#10 +
+    '기본값은 설정, 로그인, 프리셋과 다운로드 도구를 그대로 유지합니다.',
+    False,
+    False
+  );
+  UpgradeOptionsPage.Add('설정, 로그인, 프리셋 및 다운로드 도구도 초기화');
+  UpgradeOptionsPage.Values[0] := False;
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  if PageID = UpgradeOptionsPage.ID then
+    Result := not PreviousInstallDetected;
+end;
+
+function ManifestContains(
+  const Entries: TArrayOfString;
+  const RelativePath: String
+): Boolean;
+var
+  I: Integer;
+  Target: String;
+begin
+  Result := False;
+  Target := Lowercase(RelativePath);
+  for I := 0 to GetArrayLength(Entries) - 1 do
+  begin
+    if Lowercase(Trim(Entries[I])) = Target then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
+function IsUninstallerArtifact(const RelativePath: String): Boolean;
+var
+  LowerName: String;
+begin
+  if Pos('\', RelativePath) > 0 then
+  begin
+    Result := False;
+    Exit;
+  end;
+
+  LowerName := Lowercase(RelativePath);
+  Result := Pos('unins', LowerName) = 1;
+end;
+
+procedure RemoveStalePayloadInDirectory(
+  const RootDir: String;
+  const CurrentDir: String;
+  const Entries: TArrayOfString
+);
+var
+  FindRec: TFindRec;
+  FullPath: String;
+  RootPrefix: String;
+  RelativePath: String;
+begin
+  RootPrefix := AddBackslash(RootDir);
+  if FindFirst(AddBackslash(CurrentDir) + '*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') then
+        begin
+          FullPath := AddBackslash(CurrentDir) + FindRec.Name;
+          RelativePath := Copy(
+            FullPath,
+            Length(RootPrefix) + 1,
+            Length(FullPath)
+          );
+
+          if (FindRec.Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0 then
+          begin
+            Log('RR-V clean upgrade: reparse point skipped: ' + RelativePath);
+          end
+          else if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
+          begin
+            RemoveStalePayloadInDirectory(RootDir, FullPath, Entries);
+            RemoveDir(FullPath);
+          end
+          else if
+            (not IsUninstallerArtifact(RelativePath)) and
+            (not ManifestContains(Entries, RelativePath))
+          then
+          begin
+            if DeleteFile(FullPath) then
+              Log('RR-V clean upgrade: removed stale file: ' + RelativePath)
+            else
+              Log('RR-V clean upgrade: could not remove stale file: ' + RelativePath);
+          end;
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+procedure RemoveStaleApplicationPayload;
+var
+  ManifestPath: String;
+  Entries: TArrayOfString;
+begin
+  if not CleanPreviousAppPayload then
+    Exit;
+
+  ManifestPath := AddBackslash(ExpandConstant('{app}')) + InstallManifestName;
+  if not LoadStringsFromFile(ManifestPath, Entries) then
+  begin
+    Log('RR-V clean upgrade: install manifest missing; stale-file cleanup skipped.');
+    Exit;
+  end;
+
+  Log('RR-V clean upgrade: removing files not present in the new install manifest.');
+  RemoveStalePayloadInDirectory(
+    ExpandConstant('{app}'),
+    ExpandConstant('{app}'),
+    Entries
+  );
+end;
+
+procedure RemoveIntegrationRegistrations;
+var
+  LocalRRVDir: String;
+  ManifestPath: String;
+  EndpointPath: String;
+begin
+  RegDeleteValue(
+    HKCU,
+    'Software\Microsoft\Windows\CurrentVersion\Run',
+    'RR-V'
+  );
+
+  RegDeleteKeyIncludingSubkeys(
+    HKCU,
+    'Software\Google\Chrome\NativeMessagingHosts\com.rrv.browser_bridge'
+  );
+  RegDeleteKeyIncludingSubkeys(
+    HKCU,
+    'Software\Microsoft\Edge\NativeMessagingHosts\com.rrv.browser_bridge'
+  );
+
+  LocalRRVDir := ExpandConstant('{localappdata}\RR-V');
+  ManifestPath := LocalRRVDir + '\browser-integration\com.rrv.browser_bridge.json';
+  EndpointPath := LocalRRVDir + '\external-url-endpoint.json';
+  DeleteFile(ManifestPath);
+  DeleteFile(EndpointPath);
+  RemoveDir(LocalRRVDir + '\browser-integration');
+end;
+
+procedure RemoveUserData;
+begin
+  DelTree(ExpandConstant('{localappdata}\RR-V'), True, True, True);
+  DelTree(ExpandConstant('{userappdata}\RR-V'), True, True, True);
+  RegDeleteKeyIncludingSubkeys(HKCU, 'Software\RR-V');
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+  begin
+    ; 새 파일을 넣기 전의 RR-V.exe 존재 여부를 기억한다. 사용자가 기존 설치와
+    ; 무관한 다른 폴더를 직접 선택한 경우 그 폴더의 임의 파일을 정리하지 않는다.
+    CleanPreviousAppPayload := PreviousInstallDetected and
+      FileExists(ExpandConstant('{app}\RR-V.exe'));
+    ResetUserDataOnUpgrade := PreviousInstallDetected and
+      UpgradeOptionsPage.Values[0];
+  end;
+
+  if CurStep = ssPostInstall then
+  begin
+    RemoveStaleApplicationPayload;
+    if ResetUserDataOnUpgrade then
+    begin
+      Log('RR-V clean upgrade: resetting RR-V user/runtime data by user request.');
+      RemoveIntegrationRegistrations;
+      RemoveUserData;
+    end;
+  end;
+end;
 
 function ShowUninstallOptions: Boolean;
 var
@@ -252,42 +461,6 @@ function InitializeUninstall: Boolean;
 begin
   DeleteUserDataOnUninstall := False;
   Result := ShowUninstallOptions;
-end;
-
-procedure RemoveIntegrationRegistrations;
-var
-  LocalRRVDir: String;
-  ManifestPath: String;
-  EndpointPath: String;
-begin
-  RegDeleteValue(
-    HKCU,
-    'Software\Microsoft\Windows\CurrentVersion\Run',
-    'RR-V'
-  );
-
-  RegDeleteKeyIncludingSubkeys(
-    HKCU,
-    'Software\Google\Chrome\NativeMessagingHosts\com.rrv.browser_bridge'
-  );
-  RegDeleteKeyIncludingSubkeys(
-    HKCU,
-    'Software\Microsoft\Edge\NativeMessagingHosts\com.rrv.browser_bridge'
-  );
-
-  LocalRRVDir := ExpandConstant('{localappdata}\RR-V');
-  ManifestPath := LocalRRVDir + '\browser-integration\com.rrv.browser_bridge.json';
-  EndpointPath := LocalRRVDir + '\external-url-endpoint.json';
-  DeleteFile(ManifestPath);
-  DeleteFile(EndpointPath);
-  RemoveDir(LocalRRVDir + '\browser-integration');
-end;
-
-procedure RemoveUserData;
-begin
-  DelTree(ExpandConstant('{localappdata}\RR-V'), True, True, True);
-  DelTree(ExpandConstant('{userappdata}\RR-V'), True, True, True);
-  RegDeleteKeyIncludingSubkeys(HKCU, 'Software\RR-V');
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
