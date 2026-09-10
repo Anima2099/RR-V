@@ -145,9 +145,15 @@ class DownloadPage(_BaseDownloadPage):
         if chapter_completion.startswith("챕터"):
             task.phase_message = chapter_completion
 
-        # 원본 삭제 모드에서는 대표 완료 파일이 첫 챕터다. 카드의 파일 크기는
-        # 첫 조각 하나가 아니라 챕터 폴더 전체 결과 용량으로 보여준다.
-        if task.split_chapters and task.delete_original_after_split and output_file:
+        delete_succeeded = (
+            task.split_chapters
+            and task.delete_original_after_split
+            and "원본 삭제" in chapter_completion
+            and "원본 삭제 실패" not in chapter_completion
+        )
+        # 원본 삭제 성공 때만 대표 완료 파일이 첫 챕터다. 이 경우 카드의 파일
+        # 크기는 첫 조각 하나가 아니라 챕터 폴더 전체 결과 용량으로 보여준다.
+        if delete_succeeded and output_file:
             representative = Path(output_file)
             try:
                 siblings = tuple(
@@ -178,14 +184,22 @@ class DownloadPage(_BaseDownloadPage):
         }:
             partials = find_partial_download_files(task)
             should_offer = bool(partials) or (active and bool(task.output_stem))
+            if partials:
+                cleanup_message = (
+                    f"이 작업의 미완성 다운로드 파일 {len(partials)}개가 남아 있습니다. "
+                    "목록과 함께 삭제할까요?\n\n"
+                    "완성된 영상, 자막, 썸네일 파일은 삭제하지 않습니다."
+                )
+            else:
+                cleanup_message = (
+                    "다운로드 프로세스가 종료되는 동안 미완성 파일이 남을 수 있습니다. "
+                    "종료가 끝난 뒤 이 작업의 부분 파일도 정리할까요?\n\n"
+                    "완성된 영상, 자막, 썸네일 파일은 삭제하지 않습니다."
+                )
             if should_offer and ask_warm_question(
                 self,
                 "미완성 다운로드 파일 정리",
-                (
-                    f"이 작업의 미완성 다운로드 파일 {max(1, len(partials))}개를 "
-                    "목록과 함께 삭제할까요?\n\n"
-                    "완성된 영상, 자막, 썸네일 파일은 삭제하지 않습니다."
-                ),
+                cleanup_message,
                 yes_text="부분 파일도 삭제",
                 no_text="목록만 삭제",
             ):
