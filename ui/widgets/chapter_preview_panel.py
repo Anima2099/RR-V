@@ -14,7 +14,7 @@ from ui.widgets.preview_panel import PreviewPanel as _BasePreviewPanel
 
 
 class PreviewPanel(_BasePreviewPanel):
-    """1.4 챕터 저장 옵션을 기존 영상 정보 편집 패널에 덧붙인다.
+    """1.4 챕터 관련 옵션을 기존 영상 정보 편집 패널에 덧붙인다.
 
     프리셋 값은 초기값으로만 사용하고, 여기서 체크를 바꾸면 현재 영상에만
     적용된다. 사용자가 '프리셋으로 저장'을 눌렀을 때만 새 프리셋에 반영한다.
@@ -35,6 +35,12 @@ class PreviewPanel(_BasePreviewPanel):
         self.delete_original_after_split_checkbox.setToolTip(
             "모든 챕터 파일이 정상 생성된 경우에만 원본 영상을 삭제합니다."
         )
+        self.sponsorblock_chapters_checkbox = QCheckBox("SponsorBlock 챕터")
+        self.sponsorblock_chapters_checkbox.setObjectName("previewCheckBox")
+        self.sponsorblock_chapters_checkbox.setToolTip(
+            "YouTube의 SponsorBlock 구간을 영상 챕터로 표시합니다. "
+            "구간을 삭제하거나 잘라내지 않습니다."
+        )
 
         root_layout = frame.layout()
         thumbnail_row = None
@@ -44,12 +50,20 @@ class PreviewPanel(_BasePreviewPanel):
         if thumbnail_row is not None and hasattr(thumbnail_row, "insertWidget"):
             insert_at = max(0, thumbnail_row.count() - 1)
             thumbnail_row.insertWidget(insert_at, self.split_chapters_checkbox)
-            thumbnail_row.insertWidget(insert_at + 1, self.delete_original_after_split_checkbox)
+            thumbnail_row.insertWidget(
+                insert_at + 1,
+                self.delete_original_after_split_checkbox,
+            )
+            thumbnail_row.insertWidget(
+                insert_at + 2,
+                self.sponsorblock_chapters_checkbox,
+            )
         elif root_layout is not None:
             row = QHBoxLayout()
             row.setSpacing(18)
             row.addWidget(self.split_chapters_checkbox)
             row.addWidget(self.delete_original_after_split_checkbox)
+            row.addWidget(self.sponsorblock_chapters_checkbox)
             row.addStretch()
             root_layout.addLayout(row)
 
@@ -59,6 +73,7 @@ class PreviewPanel(_BasePreviewPanel):
         super()._connect_option_signals()
         self.split_chapters_checkbox.toggled.connect(self._split_chapters_changed)
         self.delete_original_after_split_checkbox.toggled.connect(self._option_changed)
+        self.sponsorblock_chapters_checkbox.toggled.connect(self._option_changed)
 
     def selected_options(self) -> dict[str, object]:
         options = super().selected_options()
@@ -70,6 +85,11 @@ class PreviewPanel(_BasePreviewPanel):
         options["delete_original_after_split"] = bool(
             split_enabled and self.delete_original_after_split_checkbox.isChecked()
         )
+        options["sponsorblock_chapters"] = bool(
+            self.sponsorblock_chapters_checkbox.isChecked()
+            and not self.audio_only_checkbox.isChecked()
+            and self._sponsorblock_supported()
+        )
         return options
 
     def _apply_preferences(self, preferences: DownloadPreferences) -> None:
@@ -77,6 +97,7 @@ class PreviewPanel(_BasePreviewPanel):
 
         self.split_chapters_checkbox.blockSignals(True)
         self.delete_original_after_split_checkbox.blockSignals(True)
+        self.sponsorblock_chapters_checkbox.blockSignals(True)
         try:
             split_enabled = bool(
                 preferences.split_chapters and not preferences.audio_only
@@ -88,11 +109,19 @@ class PreviewPanel(_BasePreviewPanel):
                     and load_delete_original_after_split(preferences.preset_id)
                 )
             )
+            self.sponsorblock_chapters_checkbox.setChecked(
+                bool(
+                    preferences.sponsorblock_chapters
+                    and not preferences.audio_only
+                )
+            )
         finally:
             self.split_chapters_checkbox.blockSignals(False)
             self.delete_original_after_split_checkbox.blockSignals(False)
+            self.sponsorblock_chapters_checkbox.blockSignals(False)
 
         self._sync_chapter_controls()
+        self._sync_sponsorblock_control()
         self._update_settings_summary()
 
     def _split_chapters_changed(self, checked: bool) -> None:
@@ -114,6 +143,7 @@ class PreviewPanel(_BasePreviewPanel):
             for checkbox in (
                 self.split_chapters_checkbox,
                 self.delete_original_after_split_checkbox,
+                self.sponsorblock_chapters_checkbox,
             ):
                 checkbox.blockSignals(True)
                 try:
@@ -121,6 +151,7 @@ class PreviewPanel(_BasePreviewPanel):
                 finally:
                     checkbox.blockSignals(False)
         self._sync_chapter_controls()
+        self._sync_sponsorblock_control()
         self._update_settings_summary()
 
     def _sync_chapter_controls(self) -> None:
@@ -132,19 +163,55 @@ class PreviewPanel(_BasePreviewPanel):
             not audio_only and self.split_chapters_checkbox.isChecked()
         )
 
+    def _sync_sponsorblock_control(self) -> None:
+        if not hasattr(self, "sponsorblock_chapters_checkbox"):
+            return
+        supported = self._sponsorblock_supported()
+        audio_only = self.audio_only_checkbox.isChecked()
+        self.sponsorblock_chapters_checkbox.setEnabled(
+            supported and not audio_only
+        )
+        if supported:
+            self.sponsorblock_chapters_checkbox.setToolTip(
+                "YouTube의 SponsorBlock 구간을 영상 챕터로 표시합니다. "
+                "구간을 삭제하거나 잘라내지 않습니다."
+            )
+        else:
+            self.sponsorblock_chapters_checkbox.setToolTip(
+                "SponsorBlock 챕터 표시는 YouTube 영상에서만 사용할 수 있습니다."
+            )
+
+    def _sponsorblock_supported(self) -> bool:
+        media_info = self.media_info
+        if media_info is None:
+            return False
+        return str(media_info.extractor or "").strip().casefold().startswith(
+            "youtube"
+        )
+
     def _update_settings_summary(self) -> None:
         super()._update_settings_summary()
         if not hasattr(self, "split_chapters_checkbox"):
             return
+        current = self.settings_summary.text().strip()
+        if (
+            self.sponsorblock_chapters_checkbox.isChecked()
+            and not self.audio_only_checkbox.isChecked()
+            and self._sponsorblock_supported()
+        ):
+            current = (
+                f"{current} · SponsorBlock 챕터"
+                if current
+                else "SponsorBlock 챕터"
+            )
         if (
             self.split_chapters_checkbox.isChecked()
             and not self.audio_only_checkbox.isChecked()
         ):
-            current = self.settings_summary.text().strip()
             current = f"{current} · 챕터별 저장" if current else "챕터별 저장"
             if self.delete_original_after_split_checkbox.isChecked():
                 current += " · 원본 삭제"
-            self.settings_summary.setText(current)
+        self.settings_summary.setText(current)
 
     def _save_current_as_preset(self) -> None:
         desired_split = bool(
@@ -153,6 +220,10 @@ class PreviewPanel(_BasePreviewPanel):
         )
         desired_delete = bool(
             desired_split and self.delete_original_after_split_checkbox.isChecked()
+        )
+        desired_sponsorblock = bool(
+            self.sponsorblock_chapters_checkbox.isChecked()
+            and not self.audio_only_checkbox.isChecked()
         )
         before_ids = {preset.preset_id for preset in self._preset_library.presets}
 
@@ -172,6 +243,7 @@ class PreviewPanel(_BasePreviewPanel):
         preferences = replace(
             created.to_preferences(),
             split_chapters=desired_split,
+            sponsorblock_chapters=desired_sponsorblock,
         ).normalized()
         replacement = created.with_preferences(preferences)
         try:
