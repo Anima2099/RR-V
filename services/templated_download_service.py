@@ -32,6 +32,7 @@ from services.media_probe_service import (
     MediaProbeError,
     MediaProbeService,
 )
+from services.ytdlp_service import YtDlpService
 
 
 class YtDlpDownloadService(_BaseDownloadService):
@@ -207,6 +208,22 @@ class YtDlpDownloadService(_BaseDownloadService):
                 chapters=cached_chapters,
             )
 
+        # SponsorBlock 표시는 완성 파일에 합성 챕터를 추가한다. 원본 분석에서
+        # 실제 챕터를 얻지 못한 작업까지 FFprobe하면 그 합성 챕터를 '분할 대상'으로
+        # 오인할 수 있다. 두 기능을 함께 켜도 SponsorBlock은 표시만 담당하도록,
+        # 이 경우에는 후처리 파일을 다시 읽지 않고 챕터 분할을 건너뛴다.
+        if task.sponsorblock_chapters:
+            try:
+                size_bytes = max(0, output_path.stat().st_size)
+            except OSError:
+                size_bytes = 0
+            return MediaFileInfo(
+                path=str(output_path),
+                file_name=output_path.name,
+                size_bytes=size_bytes,
+                chapters=(),
+            )
+
         # 오래된 대기 작업처럼 분석 캐시에 챕터가 없는 경우만 완성 파일을 한 번
         # FFprobe한다. 메타데이터 보존 옵션으로 챕터가 내장된 경우의 안전망이다.
         try:
@@ -254,6 +271,33 @@ class YtDlpDownloadService(_BaseDownloadService):
             audio_format=task.audio_format,
         )
         return render_filename_template(template, values)
+
+    def _build_command(
+        self,
+        task: DownloadTask,
+        save_directory: Path,
+        output_stem: str,
+        *,
+        overwrite_existing: bool,
+    ) -> list[str]:
+        command = super()._build_command(
+            task,
+            save_directory,
+            output_stem,
+            overwrite_existing=overwrite_existing,
+        )
+        if (
+            task.sponsorblock_chapters
+            and not task.audio_only
+            and YtDlpService.is_youtube_url(task.url)
+        ):
+            sponsor_args = ["--sponsorblock-mark", "all"]
+            # 메타데이터 보존을 꺼도 SponsorBlock 표시 자체는 최종 영상에 있어야 한다.
+            # --embed-chapters만 강제하고 일반 메타데이터 보존 여부는 그대로 둔다.
+            if "--embed-chapters" not in command:
+                sponsor_args.append("--embed-chapters")
+            command[-1:-1] = sponsor_args
+        return command
 
     @staticmethod
     def _format_selector(task: DownloadTask) -> str:
