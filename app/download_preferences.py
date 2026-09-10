@@ -63,6 +63,7 @@ class DownloadPreferences:
     save_thumbnail: bool = False
     preserve_metadata: bool = True
     split_chapters: bool = False
+    sponsorblock_chapters: bool = False
     audio_only: bool = False
     audio_format: str = "M4A"
     audio_quality: str = "최고"
@@ -91,6 +92,9 @@ class DownloadPreferences:
             codec=self.codec if self.codec in CODEC_CHOICES else "H.264",
             preferred_subtitles=tuple(preferred),
             split_chapters=bool(self.split_chapters and not self.audio_only),
+            sponsorblock_chapters=bool(
+                self.sponsorblock_chapters and not self.audio_only
+            ),
             audio_format=(
                 self.audio_format
                 if self.audio_format in AUDIO_FORMAT_CHOICES
@@ -144,6 +148,7 @@ class DownloadPreferences:
             return replace(
                 updated,
                 split_chapters=False,
+                sponsorblock_chapters=False,
                 audio_only=True,
                 audio_format="M4A",
                 audio_quality="최고",
@@ -224,6 +229,11 @@ def load_legacy_download_preferences() -> DownloadPreferences:
         save_thumbnail=_read_bool(settings, "downloads/save_thumbnail", False),
         preserve_metadata=_read_bool(settings, "downloads/preserve_metadata", True),
         split_chapters=_read_bool(settings, "downloads/split_chapters", False),
+        sponsorblock_chapters=_read_bool(
+            settings,
+            "downloads/sponsorblock_chapters",
+            False,
+        ),
         audio_only=_read_bool(settings, "downloads/audio_only", False),
         audio_format=str(settings.value("downloads/audio_format", "M4A")),
         audio_quality=str(settings.value("downloads/audio_quality", "최고")),
@@ -255,6 +265,10 @@ def save_legacy_download_preferences(preferences: DownloadPreferences) -> None:
     settings.setValue("downloads/save_thumbnail", preferences.save_thumbnail)
     settings.setValue("downloads/preserve_metadata", preferences.preserve_metadata)
     settings.setValue("downloads/split_chapters", preferences.split_chapters)
+    settings.setValue(
+        "downloads/sponsorblock_chapters",
+        preferences.sponsorblock_chapters,
+    )
     settings.setValue("downloads/audio_only", preferences.audio_only)
     settings.setValue("downloads/audio_format", preferences.audio_format)
     settings.setValue("downloads/audio_quality", preferences.audio_quality)
