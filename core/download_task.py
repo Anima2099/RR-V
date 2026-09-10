@@ -51,6 +51,7 @@ class DownloadTask:
     audio_quality: str = "최고"
     preserve_metadata: bool = True
     split_chapters: bool = False
+    delete_original_after_split: bool = False
     progress: int = 0
     speed: str = "-"
     eta: str = "-"
@@ -98,4 +99,6 @@ class DownloadTask:
         ]
         if self.split_chapters:
             items.append("챕터별 저장")
+            if self.delete_original_after_split:
+                items.append("원본 삭제")
         return " · ".join(item for item in items if item)
