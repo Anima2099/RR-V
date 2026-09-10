@@ -56,6 +56,30 @@ class ManualQuickAddAutoDownloadTests(unittest.TestCase):
         self.assertIn("quick_add_auto_download", save_method)
         self.assertIn("save_general_preferences", save_method)
 
+    def test_download_settings_split_common_and_preset_pages(self) -> None:
+        preset_tab = _method_source(
+            RUNTIME_SETTINGS_PATH,
+            "UnifiedSettingsPage",
+            "_create_preset_tab",
+        )
+
+        self.assertIn('("공통 설정", "다운로드 프리셋")', preset_tab)
+        self.assertIn("QStackedWidget", preset_tab)
+        self.assertIn("download_settings_substack", preset_tab)
+
+        common_order = (
+            "_create_download_folder_card()",
+            "_create_quick_add_behavior_card()",
+            "_create_file_collision_card()",
+            "_create_filename_template_card()",
+            "_create_download_common_save_bar()",
+        )
+        positions = [preset_tab.index(call) for call in common_order]
+        self.assertEqual(positions, sorted(positions))
+
+        preset_position = preset_tab.index("_create_download_preferences_card()")
+        self.assertGreater(preset_position, positions[-1])
+
     def test_manual_quick_add_only_arms_auto_flow_when_setting_is_enabled(self) -> None:
         quick_add = _method_source(
             RUNTIME_DOWNLOAD_PAGE_PATH,
