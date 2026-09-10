@@ -37,6 +37,7 @@ class GeneralPreferences:
     file_collision_mode: str = FILE_COLLISION_NUMBERED
     filename_template: str = DEFAULT_FILENAME_TEMPLATE
     filename_template_auto_spacing: bool = True
+    quick_add_auto_download: bool = False
 
 
 def _settings() -> QSettings:
@@ -162,6 +163,11 @@ def load_general_preferences() -> GeneralPreferences:
             "general/filename_template_auto_spacing",
             True,
         ),
+        quick_add_auto_download=_read_bool(
+            settings,
+            "general/quick_add_auto_download",
+            False,
+        ),
     )
 
 
@@ -220,6 +226,10 @@ def save_general_preferences(preferences: GeneralPreferences) -> None:
     settings.setValue(
         "general/filename_template_auto_spacing",
         bool(preferences.filename_template_auto_spacing),
+    )
+    settings.setValue(
+        "general/quick_add_auto_download",
+        bool(preferences.quick_add_auto_download),
     )
     settings.sync()
 
