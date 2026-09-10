@@ -169,6 +169,59 @@ class PartialDownloadCleanupTests(unittest.TestCase):
             self.assertEqual(find_partial_download_files(task), ())
             self.assertTrue(stale.exists())
 
+    def test_embed_thumbnail_temp_webp_is_cleaned_after_stopped_download(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            task = self._task(directory)
+            task.embed_thumbnail = True
+            task.downloaded_bytes = 1024
+
+            raw_log = root / "task.log"
+            raw_log.write_text("RR-V yt-dlp task log", encoding="utf-8")
+            task.raw_log_path = str(raw_log)
+            log_mtime = raw_log.stat().st_mtime
+
+            webp = root / "sample video.webp"
+            complete = root / "sample video.mp4"
+            subtitle = root / "sample video.ko.srt"
+            webp.write_bytes(b"thumbnail")
+            complete.write_bytes(b"video")
+            subtitle.write_text("subtitle", encoding="utf-8")
+            os.utime(webp, (log_mtime + 1.0, log_mtime + 1.0))
+
+            result = cleanup_partial_download_files(task)
+
+            self.assertIn(str(webp), result.deleted)
+            self.assertFalse(webp.exists())
+            self.assertTrue(complete.exists())
+            self.assertTrue(subtitle.exists())
+
+    def test_saved_thumbnail_jpg_is_preserved_while_temp_webp_is_cleaned(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            task = self._task(directory)
+            task.embed_thumbnail = True
+            task.save_thumbnail = True
+            task.downloaded_bytes = 1024
+
+            raw_log = root / "task.log"
+            raw_log.write_text("RR-V yt-dlp task log", encoding="utf-8")
+            task.raw_log_path = str(raw_log)
+            log_mtime = raw_log.stat().st_mtime
+
+            webp = root / "sample video.webp"
+            jpg = root / "sample video.jpg"
+            webp.write_bytes(b"temporary source")
+            jpg.write_bytes(b"requested result")
+            os.utime(webp, (log_mtime + 1.0, log_mtime + 1.0))
+            os.utime(jpg, (log_mtime + 1.0, log_mtime + 1.0))
+
+            result = cleanup_partial_download_files(task)
+
+            self.assertIn(str(webp), result.deleted)
+            self.assertFalse(webp.exists())
+            self.assertTrue(jpg.exists())
+
 
 class ChapterOriginalDeletionContractTests(unittest.TestCase):
     def test_card_meta_shows_original_delete_only_with_chapter_split(self) -> None:
@@ -223,6 +276,7 @@ class ChapterOriginalDeletionContractTests(unittest.TestCase):
 
         self.assertIn("_pending_partial_cleanup", source)
         self.assertIn("미완성 다운로드 파일 정리", source)
+        self.assertIn("미완성 파일도 삭제", source)
         self.assertIn("should_offer_partial_cleanup", source)
         self.assertIn("QTimer.singleShot", source)
         self.assertIn("cleanup_partial_download_files", source)
