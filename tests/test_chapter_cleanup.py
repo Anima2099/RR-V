@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -121,6 +122,53 @@ class PartialDownloadCleanupTests(unittest.TestCase):
             self.assertEqual(names, {partial.name})
             self.assertTrue(unrelated.exists())
 
+    def test_recent_session_similarity_recovers_filename_variation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            task = self._task(directory)
+            task.output_stem = (
+                "STALKER 2 GARBAGE All Artifacts Locations Natural Locations Mission Artifacts"
+            )
+            task.downloaded_bytes = 1024
+
+            raw_log = root / "task.log"
+            raw_log.write_text("RR-V yt-dlp task log", encoding="utf-8")
+            task.raw_log_path = str(raw_log)
+            log_mtime = raw_log.stat().st_mtime
+
+            partial = root / (
+                "STALKER_2_GARBAGE_All_Artifacts_Locations_"
+                "Natural_Locations_Mission_Artifacts.mp4.part"
+            )
+            partial.write_bytes(b"partial")
+            os.utime(partial, (log_mtime + 1.0, log_mtime + 1.0))
+
+            self.assertEqual(find_partial_download_files(task), (partial,))
+
+    def test_old_similar_partial_is_not_claimed_by_new_session(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            task = self._task(directory)
+            task.output_stem = (
+                "STALKER 2 GARBAGE All Artifacts Locations Natural Locations Mission Artifacts"
+            )
+            task.downloaded_bytes = 1024
+
+            raw_log = root / "task.log"
+            raw_log.write_text("RR-V yt-dlp task log", encoding="utf-8")
+            task.raw_log_path = str(raw_log)
+            log_mtime = raw_log.stat().st_mtime
+
+            stale = root / (
+                "STALKER_2_GARBAGE_All_Artifacts_Locations_"
+                "Natural_Locations_Mission_Artifacts.mp4.part"
+            )
+            stale.write_bytes(b"old partial")
+            os.utime(stale, (log_mtime - 30.0, log_mtime - 30.0))
+
+            self.assertEqual(find_partial_download_files(task), ())
+            self.assertTrue(stale.exists())
+
 
 class ChapterOriginalDeletionContractTests(unittest.TestCase):
     def test_card_meta_shows_original_delete_only_with_chapter_split(self) -> None:
@@ -178,6 +226,16 @@ class ChapterOriginalDeletionContractTests(unittest.TestCase):
         self.assertIn("should_offer_partial_cleanup", source)
         self.assertIn("QTimer.singleShot", source)
         self.assertIn("cleanup_partial_download_files", source)
+
+    def test_partial_cleanup_retries_without_blocking_ui_thread(self) -> None:
+        path = ROOT / "ui" / "pages" / "download_page_chapters.py"
+        source = path.read_text(encoding="utf-8")
+        ast.parse(source, filename=str(path))
+
+        self.assertIn("_PARTIAL_CLEANUP_RETRY_DELAYS_MS = (0, 250, 500, 750)", source)
+        self.assertIn("def _attempt_partial_cleanup", source)
+        self.assertIn('"download.partial_cleanup_retry"', source)
+        self.assertNotIn("time.sleep", source)
 
     def test_settings_exposes_safe_default_off_original_delete_choice(self) -> None:
         settings_path = ROOT / "ui" / "pages" / "chapter_settings_page.py"
