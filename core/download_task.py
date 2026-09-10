@@ -90,13 +90,12 @@ class DownloadTask:
                 if item
             )
 
-        return " · ".join(
-            item
-            for item in (
-                self.resolution,
-                self.container,
-                self.codec,
-                self.subtitle,
-            )
-            if item
-        )
+        items = [
+            self.resolution,
+            self.container,
+            self.codec,
+            self.subtitle,
+        ]
+        if self.split_chapters:
+            items.append("챕터별 저장")
+        return " · ".join(item for item in items if item)
