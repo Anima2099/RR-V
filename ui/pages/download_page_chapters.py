@@ -252,6 +252,9 @@ class DownloadPage(_BaseDownloadPage):
         deleted: tuple[str, ...],
         unresolved_failed: tuple[str, ...],
     ) -> None:
+        # 취소 직후에는 yt-dlp가 .part를 먼저 놓고 썸네일 WEBP 같은 부가 파일을
+        # 조금 늦게 남길 수 있다. 따라서 이번 스캔에서 삭제가 성공했더라도 정해진
+        # 유예 구간 전체를 끝까지 다시 스캔해 뒤늦게 나타난 임시 산출물까지 정리한다.
         result = cleanup_partial_download_files(task)
         deleted_now = tuple(dict.fromkeys((*deleted, *result.deleted)))
 
@@ -265,12 +268,10 @@ class DownloadPage(_BaseDownloadPage):
                 still_failed.append(path)
         unresolved_now = tuple(still_failed)
 
-        no_match_yet = not deleted_now and not unresolved_now
-        retry_needed = bool(unresolved_now or no_match_yet)
         next_attempt = attempt + 1
         can_retry = next_attempt < len(_PARTIAL_CLEANUP_RETRY_DELAYS_MS)
 
-        if retry_needed and can_retry:
+        if can_retry:
             delay_ms = _PARTIAL_CLEANUP_RETRY_DELAYS_MS[next_attempt]
             write_download_event(
                 "download.partial_cleanup_retry",
