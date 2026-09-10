@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from time import time
+
 from PySide6.QtCore import QObject, Signal
 
 from core.download_task import DownloadTask
@@ -72,6 +74,9 @@ class DownloadController(QObject):
         if self.is_downloading:
             return False
 
+        # cleanup 판별에 쓰는 기준 시각은 raw log의 mtime처럼 움직이면 안 된다.
+        # 다운로드 세션이 실제로 시작되는 순간을 한 번만 고정해 둔다.
+        task.download_started_at = time()
         worker = DownloadWorker(task)
         task_id = task.task_id
         self._download_worker = worker
