@@ -58,6 +58,8 @@ def find_partial_download_files(task: DownloadTask) -> tuple[Path, ...]:
     썸네일 내장/별도 저장 과정에서 중지 때문에 남은 WEBP/PNG/JPG 같은 이미지도
     현재 작업에서 생성된 것이 확인되는 경우에만 정리 후보에 넣는다. 이때 시각
     기준은 계속 갱신되는 raw log mtime이 아니라 다운로드 시작 때 고정한 값을 쓴다.
+    yt-dlp의 --trim-filenames로 실제 파일명이 잘린 경우에도 현재 세션의 긴 공통
+    파일명 접두부를 확인해서 해당 작업의 임시 썸네일을 찾는다.
     사용자가 '썸네일 JPG 별도 저장'을 선택했다면 완성 JPG/JPEG는 보존한다.
     """
 
@@ -105,10 +107,16 @@ def find_partial_download_files(task: DownloadTask) -> tuple[Path, ...]:
         if not _is_temporary_thumbnail_name(task, path.name):
             continue
 
+        thumbnail_session_match = _matches_current_thumbnail_session(
+            path,
+            stem_identity=stem_identity,
+            download_started_at=download_started_at,
+        )
         if _matches_current_thumbnail_artifact(
             path,
             stem_match=stem_match,
             log_match=log_match,
+            session_match=thumbnail_session_match,
             download_started_at=download_started_at,
         ):
             candidates.append(path)
@@ -180,22 +188,36 @@ def partial_cleanup_scan_diagnostics(task: DownloadTask) -> tuple[str, ...]:
             )
             candidate = stem_match or log_match or session_match
             kind = "partial"
+            eligible = True
             extra = f"session={int(session_match)}"
         else:
             eligible = _is_temporary_thumbnail_name(task, path.name)
-            time_match = eligible and _matches_current_thumbnail_artifact(
-                path,
-                stem_match=stem_match,
-                log_match=log_match,
-                download_started_at=started_at,
+            session_match = bool(
+                eligible
+                and _matches_current_thumbnail_session(
+                    path,
+                    stem_identity=stem_identity,
+                    download_started_at=started_at,
+                )
             )
-            candidate = bool(time_match)
+            candidate = bool(
+                eligible
+                and _matches_current_thumbnail_artifact(
+                    path,
+                    stem_match=stem_match,
+                    log_match=log_match,
+                    session_match=session_match,
+                    download_started_at=started_at,
+                )
+            )
             kind = "thumb"
-            extra = f"eligible={int(eligible)}"
+            extra = (
+                f"eligible={int(eligible)};session={int(session_match)}"
+            )
 
-        # 한 줄 로그가 지나치게 커지지 않도록 현재 stem 또는 로그와 관련 있는
-        # 파일, 혹은 실제 후보만 남긴다.
-        if candidate or stem_match or log_match:
+        # 임시 썸네일은 후보에서 탈락해도 판정 근거를 남겨 다음 스모크에서
+        # 파일명 잘림/시각/설정 중 무엇이 원인인지 바로 확인할 수 있게 한다.
+        if candidate or stem_match or log_match or (kind == "thumb" and eligible):
             details.append(
                 f"{path.name};kind={kind};candidate={int(candidate)};"
                 f"stem={int(stem_match)};log={int(log_match)};{extra};"
@@ -239,9 +261,10 @@ def _matches_current_thumbnail_artifact(
     *,
     stem_match: bool,
     log_match: bool,
+    session_match: bool,
     download_started_at: float | None,
 ) -> bool:
-    if log_match:
+    if log_match or session_match:
         return True
     if not stem_match or download_started_at is None:
         return False
@@ -250,6 +273,26 @@ def _matches_current_thumbnail_artifact(
     except OSError:
         return False
     return modified_at >= download_started_at - 5.0
+
+
+def _matches_current_thumbnail_session(
+    path: Path,
+    *,
+    stem_identity: str,
+    download_started_at: float | None,
+) -> bool:
+    if not stem_identity or download_started_at is None:
+        return False
+
+    try:
+        modified_at = path.stat().st_mtime
+    except OSError:
+        return False
+    if modified_at < download_started_at - 5.0:
+        return False
+
+    candidate_identity = _thumbnail_filename_identity(path.name)
+    return _has_matching_filename_prefix(stem_identity, candidate_identity)
 
 
 def _candidate_log_probes(name: str) -> tuple[str, ...]:
@@ -281,10 +324,17 @@ def _matches_current_download_session(
         return False
 
     candidate_identity = _partial_filename_identity(path.name)
-    if not candidate_identity:
+    return _has_matching_filename_prefix(stem_identity, candidate_identity)
+
+
+def _has_matching_filename_prefix(
+    expected_identity: str,
+    candidate_identity: str,
+) -> bool:
+    if not expected_identity or not candidate_identity:
         return False
 
-    left_tokens = stem_identity.split()
+    left_tokens = expected_identity.split()
     right_tokens = candidate_identity.split()
     shared_tokens = 0
     shared_chars = 0
@@ -294,7 +344,7 @@ def _matches_current_download_session(
         shared_tokens += 1
         shared_chars += len(left)
 
-    shorter_length = min(len(stem_identity), len(candidate_identity))
+    shorter_length = min(len(expected_identity), len(candidate_identity))
     return bool(
         shared_tokens >= 4
         and shared_chars >= 24
@@ -308,6 +358,16 @@ def _partial_filename_identity(name: str) -> str:
     base = re.sub(r"\.f\d+(?:-\d+)?$", "", base, flags=re.IGNORECASE)
     base = re.sub(r"\.[A-Za-z0-9]{2,5}$", "", base)
     base = re.sub(r"\.f\d+(?:-\d+)?$", "", base, flags=re.IGNORECASE)
+    return _filename_identity(base)
+
+
+def _thumbnail_filename_identity(name: str) -> str:
+    base = re.sub(
+        r"\.(?:webp|png|jpe?g|avif)$",
+        "",
+        name,
+        flags=re.IGNORECASE,
+    )
     return _filename_identity(base)
 
 
