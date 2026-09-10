@@ -13,6 +13,7 @@ from services.partial_download_cleanup import (
     PartialCleanupResult,
     cleanup_partial_download_files,
     find_partial_download_files,
+    should_offer_partial_cleanup,
 )
 from ui.dialogs.warm_dialogs import ask_warm_question
 from ui.pages.download_page import DownloadPage as _BaseDownloadPage
@@ -183,7 +184,11 @@ class DownloadPage(_BaseDownloadPage):
             DownloadStatus.FAILED,
         }:
             partials = find_partial_download_files(task)
-            should_offer = bool(partials) or (active and bool(task.output_stem))
+            should_offer = should_offer_partial_cleanup(
+                task,
+                active=active,
+                detected_count=len(partials),
+            )
             if partials:
                 cleanup_message = (
                     f"이 작업의 미완성 다운로드 파일 {len(partials)}개가 남아 있습니다. "
@@ -192,8 +197,8 @@ class DownloadPage(_BaseDownloadPage):
                 )
             else:
                 cleanup_message = (
-                    "다운로드 프로세스가 종료되는 동안 미완성 파일이 남을 수 있습니다. "
-                    "종료가 끝난 뒤 이 작업의 부분 파일도 정리할까요?\n\n"
+                    "이 작업은 다운로드를 시작한 기록이 있습니다. "
+                    "남아 있는 미완성 파일도 함께 정리할까요?\n\n"
                     "완성된 영상, 자막, 썸네일 파일은 삭제하지 않습니다."
                 )
             if should_offer and ask_warm_question(
