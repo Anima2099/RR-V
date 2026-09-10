@@ -26,7 +26,15 @@ class ChapterDownloadUiContractTests(unittest.TestCase):
         self.assertIn('QCheckBox("챕터별 파일 저장")', source)
         self.assertIn('options["split_chapters"]', source)
         self.assertIn("preferences.split_chapters", source)
-        self.assertIn("self.split_chapters_checkbox.setEnabled(not checked)", source)
+        self.assertIn("self._sync_chapter_controls()", source)
+        self.assertIn(
+            "self.split_chapters_checkbox.setEnabled(not audio_only)",
+            source,
+        )
+        self.assertIn(
+            "self.delete_original_after_split_checkbox.setEnabled(",
+            source,
+        )
         self.assertIn("챕터별 저장", source)
 
     def test_preview_choice_is_carried_to_new_download_task(self) -> None:
@@ -34,8 +42,11 @@ class ChapterDownloadUiContractTests(unittest.TestCase):
         source = path.read_text(encoding="utf-8")
         ast.parse(source, filename=str(path))
 
-        self.assertIn('selected_options().get("split_chapters", False)', source)
+        self.assertIn("options = self.preview_panel.selected_options()", source)
+        self.assertIn('options.get("split_chapters", False)', source)
+        self.assertIn('options.get("delete_original_after_split", False)', source)
         self.assertIn("created.split_chapters = bool", source)
+        self.assertIn("created.delete_original_after_split = bool", source)
         self.assertIn("preferences.split_chapters and not task.audio_only", source)
         self.assertIn("self._schedule_queue_save()", source)
 
