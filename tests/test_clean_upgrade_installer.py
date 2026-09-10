@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import unittest
 
 
@@ -90,6 +91,13 @@ class CleanUpgradeInstallerContractTests(unittest.TestCase):
         )
         self.assertIn("UsePreviousAppDir=yes", self.installer)
         self.assertIn("UninstallDisplayName=RR-V {#MyAppVersion}", self.installer)
+
+    def test_pascal_code_section_does_not_use_section_style_comments(self) -> None:
+        code_section = self.installer.split("[Code]", 1)[1]
+        self.assertIsNone(
+            re.search(r"(?m)^\s*;", code_section),
+            "[Code] uses Pascal Script; comments there must use // rather than ;",
+        )
 
 
 if __name__ == "__main__":
