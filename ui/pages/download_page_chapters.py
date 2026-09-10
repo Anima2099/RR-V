@@ -196,19 +196,19 @@ class DownloadPage(_BaseDownloadPage):
                 cleanup_message = (
                     f"이 작업의 미완성 다운로드 파일 {len(partials)}개가 남아 있습니다. "
                     "목록과 함께 삭제할까요?\n\n"
-                    "완성된 영상, 자막, 썸네일 파일은 삭제하지 않습니다."
+                    "완성된 영상과 별도 저장을 선택한 결과 파일은 삭제하지 않습니다."
                 )
             else:
                 cleanup_message = (
                     "이 작업은 다운로드를 시작한 기록이 있습니다. "
                     "남아 있는 미완성 파일도 함께 정리할까요?\n\n"
-                    "완성된 영상, 자막, 썸네일 파일은 삭제하지 않습니다."
+                    "완성된 영상과 별도 저장을 선택한 결과 파일은 삭제하지 않습니다."
                 )
             if should_offer and ask_warm_question(
                 self,
                 "미완성 다운로드 파일 정리",
                 cleanup_message,
-                yes_text="부분 파일도 삭제",
+                yes_text="미완성 파일도 삭제",
                 no_text="목록만 삭제",
             ):
                 if active:
