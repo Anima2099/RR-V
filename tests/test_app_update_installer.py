@@ -8,10 +8,12 @@ from unittest.mock import patch
 
 from app.app_update import AppInstallerAsset
 from app.app_update_installer import (
+    RRV_UPDATE_DOWNLOAD_DIR,
     download_verified_installer,
     file_sha256,
     verify_installer_file,
 )
+from app.paths import RRV_LOCAL_DIR
 
 
 class AppUpdateInstallerTests(unittest.TestCase):
@@ -25,6 +27,15 @@ class AppUpdateInstallerTests(unittest.TestCase):
             ),
             sha256=hashlib.sha256(content).hexdigest(),
             size=len(content) if size is None else size,
+        )
+
+    def test_default_update_directory_is_outside_rrv_local_data(self) -> None:
+        update_path = str(RRV_UPDATE_DOWNLOAD_DIR.resolve()).casefold()
+        local_path = str(RRV_LOCAL_DIR.resolve()).casefold()
+        self.assertFalse(
+            update_path == local_path
+            or update_path.startswith(local_path.rstrip("\\/") + "\\")
+            or update_path.startswith(local_path.rstrip("\\/") + "/")
         )
 
     def test_file_sha256_matches_known_content(self) -> None:

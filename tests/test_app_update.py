@@ -16,6 +16,7 @@ from app.app_update import (
     normalize_update_channel,
     update_channel_label,
 )
+from app.constants import APP_VERSION
 
 
 class AppUpdateVersionTests(unittest.TestCase):
@@ -69,6 +70,11 @@ class AppUpdateChannelTests(unittest.TestCase):
             "html_url": url or f"https://example.test/{tag}",
             "assets": list(assets or []),
         }
+
+    @staticmethod
+    def _next_patch_version() -> str:
+        major, minor, patch_number = _version_tuple(APP_VERSION)
+        return f"{major}.{minor}.{patch_number + 1}"
 
     def test_channel_labels_are_korean(self) -> None:
         self.assertEqual(update_channel_label(UPDATE_CHANNEL_STABLE), "정식")
@@ -161,13 +167,13 @@ class AppUpdateChannelTests(unittest.TestCase):
 
     @patch("app.app_update.fetch_https_bytes")
     def test_current_beta_can_update_to_same_version_stable(self, fetch) -> None:  # type: ignore[no-untyped-def]
-        payload = [self._release("v1.3.0", prerelease=False)]
+        payload = [self._release(f"v{APP_VERSION}", prerelease=False)]
         fetch.return_value = json.dumps(payload).encode("utf-8")
 
         result = check_app_update(update_channel=UPDATE_CHANNEL_STABLE)
 
         self.assertTrue(result.update_available)
-        self.assertEqual(result.latest_version, "1.3.0")
+        self.assertEqual(result.latest_version, APP_VERSION)
         self.assertEqual(result.latest_release_channel, UPDATE_CHANNEL_STABLE)
         self.assertIn("같은 번호의 정식 버전", result.message)
 
@@ -184,11 +190,12 @@ class AppUpdateChannelTests(unittest.TestCase):
 
     @patch("app.app_update.fetch_https_bytes")
     def test_update_result_exposes_verified_installer(self, fetch) -> None:  # type: ignore[no-untyped-def]
+        newer_version = self._next_patch_version()
         payload = [
             self._release(
-                "v1.4.0-community-beta",
+                f"v{newer_version}-community-beta",
                 prerelease=True,
-                assets=[self._asset("1.4.0")],
+                assets=[self._asset(newer_version)],
             )
         ]
         fetch.return_value = json.dumps(payload).encode("utf-8")
@@ -197,7 +204,10 @@ class AppUpdateChannelTests(unittest.TestCase):
 
         self.assertTrue(result.update_available)
         self.assertIsNotNone(result.installer)
-        self.assertEqual(result.installer.name, "RR-V_Setup_1.4.0.exe")  # type: ignore[union-attr]
+        self.assertEqual(
+            result.installer.name,  # type: ignore[union-attr]
+            f"RR-V_Setup_{newer_version}.exe",
+        )
 
 
 if __name__ == "__main__":

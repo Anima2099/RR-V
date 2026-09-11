@@ -3,16 +3,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
+import tempfile
 from typing import Callable
 
 from app.app_update import AppInstallerAsset
 from app.constants import APP_VERSION
 from app.http_client import download_https_file
-from app.paths import RRV_LOCAL_DIR
 
 
 InstallerProgress = Callable[[int, int], None]
-RRV_UPDATE_DOWNLOAD_DIR = RRV_LOCAL_DIR / "updates"
+# 업데이트 Installer는 RR-V 사용자/런타임 데이터 밖에 둔다. 사용자가 Installer의
+# '사용자 데이터 초기화'를 선택해 %LOCALAPPDATA%\RR-V 전체를 지워도 현재 실행 중인
+# 검증된 Installer 자신이 함께 삭제되는 상황을 피한다.
+RRV_UPDATE_DOWNLOAD_DIR = Path(tempfile.gettempdir()) / "RR-V" / "updates"
 
 
 @dataclass(slots=True, frozen=True)

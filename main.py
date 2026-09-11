@@ -98,6 +98,11 @@ def main() -> int:
             print(f"RR-V Windows startup registration sync failed: {error}")
 
     # 테마 선택과 Dark SVG 경로를 먼저 확정한 뒤 UI 모듈을 불러온다.
+    # 기존 MainWindow의 구조는 유지하고 1.4 챕터 설정 화면만 주입한다.
+    from ui.pages.chapter_settings_page import UnifiedSettingsPage as ChapterSettingsPage
+    import ui.main_window as main_window_module
+
+    main_window_module.UnifiedSettingsPage = ChapterSettingsPage
     from ui.main_window import MainWindow
 
     window = MainWindow()

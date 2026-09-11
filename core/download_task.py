@@ -50,6 +50,9 @@ class DownloadTask:
     audio_format: str = "M4A"
     audio_quality: str = "최고"
     preserve_metadata: bool = True
+    split_chapters: bool = False
+    sponsorblock_chapters: bool = False
+    delete_original_after_split: bool = False
     progress: int = 0
     speed: str = "-"
     eta: str = "-"
@@ -61,6 +64,7 @@ class DownloadTask:
     output_stem: str = ""
     output_file: str = ""
     raw_log_path: str = ""
+    download_started_at: float = 0.0
     process_id: int = 0
     phase_message: str = ""
     error_message: str = ""
@@ -89,13 +93,40 @@ class DownloadTask:
                 if item
             )
 
-        return " · ".join(
-            item
-            for item in (
-                self.resolution,
-                self.container,
-                self.codec,
-                self.subtitle,
-            )
-            if item
-        )
+        items = [
+            self.resolution,
+            self.container,
+            self.codec,
+            self.subtitle,
+        ]
+        if self.sponsorblock_chapters:
+            items.append("SponsorBlock 챕터")
+        if self.split_chapters:
+            items.append("챕터별 저장")
+            if self.delete_original_after_split:
+                items.append("원본 삭제")
+        return " · ".join(item for item in items if item)
+
+
+def remove_failed_tasks(
+    tasks: list[DownloadTask],
+) -> tuple[list[DownloadTask], list[str]]:
+    """실패 상태의 작업만 목록에서 골라낸다.
+
+    실제 다운로드 파일은 건드리지 않고, UI/큐 목록에서 제거할 task id만 반환한다.
+    입력 리스트 자체는 수정하지 않는다.
+    """
+
+    failed_ids = [
+        task.task_id
+        for task in tasks
+        if task.status is DownloadStatus.FAILED
+    ]
+    if not failed_ids:
+        return list(tasks), []
+
+    failed_set = set(failed_ids)
+    remaining_tasks = [
+        task for task in tasks if task.task_id not in failed_set
+    ]
+    return remaining_tasks, failed_ids

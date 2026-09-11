@@ -50,23 +50,23 @@ class SourceSyntaxTests(unittest.TestCase):
         }
         self.assertIn("_create_tool_diagnostics_card", called_methods)
 
-    def test_unified_settings_defers_startup_tool_refresh(self) -> None:
+    def test_settings_entry_point_defers_startup_tool_refresh(self) -> None:
         path = ROOT / "ui" / "pages" / "unified_settings_page.py"
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        unified_class = next(
+        settings_class = next(
             node
             for node in tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "UnifiedSettingsPage"
+            if isinstance(node, ast.ClassDef) and node.name == "SettingsPage"
         )
         init_method = next(
             node
-            for node in unified_class.body
+            for node in settings_class.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             and node.name == "__init__"
         )
         refresh_method = next(
             node
-            for node in unified_class.body
+            for node in settings_class.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             and node.name == "_refresh_tool_status"
         )
@@ -88,17 +88,17 @@ class SourceSyntaxTests(unittest.TestCase):
             )
         )
 
-    def test_unified_settings_reuses_background_tool_snapshot(self) -> None:
+    def test_settings_entry_point_reuses_background_tool_snapshot(self) -> None:
         path = ROOT / "ui" / "pages" / "unified_settings_page.py"
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        unified_class = next(
+        settings_class = next(
             node
             for node in tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "UnifiedSettingsPage"
+            if isinstance(node, ast.ClassDef) and node.name == "SettingsPage"
         )
         done_method = next(
             node
-            for node in unified_class.body
+            for node in settings_class.body
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             and node.name == "_component_check_done"
         )
@@ -114,6 +114,39 @@ class SourceSyntaxTests(unittest.TestCase):
         }
         self.assertIn("_apply_inspected_tool_statuses", called_methods)
         self.assertIn("installed_statuses", string_constants)
+
+    def test_unified_settings_aliases_final_settings_page(self) -> None:
+        path = ROOT / "ui" / "pages" / "unified_settings_page.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        alias = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "UnifiedSettingsPage"
+                for target in node.targets
+            )
+        )
+        self.assertIsInstance(alias.value, ast.Name)
+        self.assertEqual(alias.value.id, "SettingsPage")
+
+    def test_media_tools_page_registers_remux_without_detailed_info_tab(self) -> None:
+        path = ROOT / "ui" / "pages" / "media_tools_page.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        string_constants = {
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        }
+        called_names = {
+            node.func.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+        self.assertIn("Remux", string_constants)
+        self.assertIn("RemuxPage", called_names)
+        self.assertNotIn("상세 정보", string_constants)
+        self.assertNotIn("MediaInfoPage", called_names)
 
 
 if __name__ == "__main__":

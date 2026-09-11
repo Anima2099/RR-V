@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from app.constants import APP_VERSION, SIDEBAR_WIDTH
+from app.constants import APP_DISPLAY_VERSION, SIDEBAR_WIDTH
 
 
 class Sidebar(QFrame):
@@ -66,7 +66,7 @@ class Sidebar(QFrame):
         layout.addWidget(info_button)
         layout.addSpacing(2)
 
-        version = QLabel(f"Version {APP_VERSION}")
+        version = QLabel(f"Version {APP_DISPLAY_VERSION}")
         version.setObjectName("versionLabel")
         version.setAlignment(Qt.AlignmentFlag.AlignCenter)
 

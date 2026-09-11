@@ -1,5 +1,5 @@
-RR-V 1.2.0 - SOURCE AVAILABILITY / WRITTEN OFFER
-=================================================
+RR-V - SOURCE AVAILABILITY / WRITTEN OFFER
+==========================================
 
 RR-V distributes several third-party components under open-source licenses.
 This file explains how recipients can obtain source code corresponding to the
@@ -11,29 +11,36 @@ LGPL/AGPL-covered components included with an RR-V release.
 RR-V Auth Helper is distributed under the GNU Affero General Public License
 version 3.0 only (AGPL-3.0-only).
 
-The preferred source form of the RR-V Auth Helper is included with the release
-under:
+The preferred source form of the RR-V Auth Helper is included in the public
+RR-V repository under:
+
+  auth_helper\
+
+and its build definition is available at:
+
+  RR-V-Auth-Helper.spec
+
+Public RR-V release packages also include the helper preferred source form under:
 
   licenses\RR-V-Auth-Helper-source\
 
-That directory also contains a complete AGPL-3.0 license copy.
+That release directory also contains a complete AGPL-3.0 license copy.
 
 The nodriver 0.50.3 source used by the helper is distributed as Python source in
 the bundled RR-V WPC runtime. The yt-dlp-getpot-wpc source and RR-V's small
 bootstrap modification are also distributed in that runtime.
 
-When the RR-V repository is public, the same RR-V Auth Helper source is also
-available from:
+Public repository:
 
   https://github.com/Anima2099/RR-V
 
 2. PYSIDE6 / QT LGPL SOURCE
 ---------------------------
 
-RR-V 1.2.0 uses PySide6 / Qt for Python 6.11.1 under the applicable LGPL v3
+RR-V currently uses PySide6 / Qt for Python 6.11.1 under the applicable LGPL v3
 terms for the Qt/PySide libraries used by RR-V.
 
-Exact upstream source tags corresponding to the release version are available at:
+Exact upstream source tags corresponding to this dependency set are available at:
 
   Qt for Python / PySide 6.11.1:
   https://github.com/pyside/pyside-setup/tree/v6.11.1

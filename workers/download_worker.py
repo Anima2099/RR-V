@@ -6,11 +6,8 @@ from PySide6.QtCore import QThread, Signal
 
 from app.download_log import write_download_event
 from core.download_task import DownloadTask
-from services.download_service import (
-    DownloadCancelledError,
-    DownloadExecutionError,
-    YtDlpDownloadService,
-)
+from services.download_service import DownloadCancelledError, DownloadExecutionError
+from services.templated_download_service import YtDlpDownloadService
 
 
 class DownloadWorker(QThread):

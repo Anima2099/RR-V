@@ -108,7 +108,6 @@ def load_queue() -> QueueLoadResult:
         return QueueLoadResult(tasks=[], error_message=combined)
 
 
-
 def _is_valid_queue_file(path: Path) -> bool:
     try:
         with path.open("r", encoding="utf-8") as handle:
@@ -119,6 +118,7 @@ def _is_valid_queue_file(path: Path) -> bool:
         )
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return False
+
 
 def _load_from_path(path: Path) -> list[DownloadTask]:
     with path.open("r", encoding="utf-8") as handle:
@@ -185,6 +185,11 @@ def _task_from_dict(raw: dict[str, object]) -> DownloadTask | None:
         audio_format=str(raw.get("audio_format", "M4A")),
         audio_quality=str(raw.get("audio_quality", "최고")),
         preserve_metadata=bool(raw.get("preserve_metadata", True)),
+        split_chapters=bool(raw.get("split_chapters", False)),
+        sponsorblock_chapters=bool(raw.get("sponsorblock_chapters", False)),
+        delete_original_after_split=bool(
+            raw.get("delete_original_after_split", False)
+        ),
         progress=_safe_int(raw.get("progress", 0)),
         speed=str(raw.get("speed", "-")),
         eta=str(raw.get("eta", "-")),
@@ -202,6 +207,9 @@ def _task_from_dict(raw: dict[str, object]) -> DownloadTask | None:
             str(raw.get("output_file", "")),
         ),
         raw_log_path=str(raw.get("raw_log_path", "")),
+        download_started_at=_safe_nonnegative_float(
+            raw.get("download_started_at", 0.0)
+        ),
         process_id=0,
         phase_message=str(raw.get("phase_message", "")),
         error_message=str(raw.get("error_message", "")),
@@ -247,6 +255,13 @@ def _safe_nonnegative_int(value: object) -> int:
         return 0
 
 
+def _safe_nonnegative_float(value: object) -> float:
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+
+
 def _thumbnail_name(task_id: str) -> str:
     digest = hashlib.sha256(task_id.encode("utf-8")).hexdigest()
     return f"{digest}.img"
@@ -264,7 +279,7 @@ def _read_thumbnail(name: str) -> bytes:
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
     temp_path = path.with_suffix(path.suffix + ".tmp")
     try:
-        with temp_path.open("wb") as handle:
+        with path.with_suffix(path.suffix + ".tmp").open("wb") as handle:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())

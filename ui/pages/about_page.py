@@ -189,7 +189,7 @@ class AboutPage(QWidget):
 
         description = QLabel(
             "선택한 업데이트 채널을 기준으로 GitHub Releases에서 RR-V의 새 버전을 확인합니다. "
-            "새 버전이 있으면 검증된 설치 파일을 내려받아 바로 업데이트할 수 있습니다."
+            "새 버전이 있으면 변경사항을 먼저 확인한 뒤 검증된 설치 파일로 업데이트할 수 있습니다."
         )
         description.setObjectName("bodyText")
         description.setWordWrap(True)
@@ -255,6 +255,25 @@ class AboutPage(QWidget):
         self.update_status_label.setObjectName("mutedText")
         self.update_status_label.setWordWrap(True)
 
+        self.release_notes_frame = QFrame()
+        self.release_notes_frame.setObjectName("settingsOptionGroup")
+        release_notes_layout = QVBoxLayout(self.release_notes_frame)
+        release_notes_layout.setContentsMargins(14, 12, 14, 12)
+        release_notes_layout.setSpacing(8)
+
+        self.release_notes_title = QLabel("이번 업데이트")
+        self.release_notes_title.setObjectName("settingsGroupTitle")
+        self.release_notes_label = QLabel("")
+        self.release_notes_label.setObjectName("bodyText")
+        self.release_notes_label.setWordWrap(True)
+        self.release_notes_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+
+        release_notes_layout.addWidget(self.release_notes_title)
+        release_notes_layout.addWidget(self.release_notes_label)
+        self.release_notes_frame.setVisible(False)
+
         self.check_update_button = QPushButton("업데이트 확인")
         self.check_update_button.setObjectName("primaryButton")
         self.check_update_button.clicked.connect(self._start_update_check)
@@ -276,6 +295,7 @@ class AboutPage(QWidget):
         card_layout.addWidget(channel_hint)
         card_layout.addLayout(grid)
         card_layout.addWidget(self.update_status_label)
+        card_layout.addWidget(self.release_notes_frame)
         card_layout.addLayout(button_row)
         return card
 
@@ -321,6 +341,16 @@ class AboutPage(QWidget):
         card_layout.addWidget(support_hint)
         return card
 
+    def _set_release_notes_preview(self, notes: str, version: str = "") -> None:
+        if not hasattr(self, "release_notes_frame"):
+            return
+        preview = str(notes or "").strip()
+        self.release_notes_label.setText(preview)
+        self.release_notes_title.setText(
+            f"RR-V {version} 변경사항" if preview and version else "이번 업데이트"
+        )
+        self.release_notes_frame.setVisible(bool(preview))
+
     def _update_channel_changed(self) -> None:
         if self._update_check_running or self._installer_download_running:
             return
@@ -340,6 +370,7 @@ class AboutPage(QWidget):
         self.latest_version_label.setText("확인 전")
         self.release_button.setText("업데이트 설치")
         self.release_button.setEnabled(False)
+        self._set_release_notes_preview("")
         self.update_status_label.setText(
             f"{update_channel_label(selected)} 채널로 변경했습니다. 업데이트 확인을 눌러 주세요."
         )
@@ -365,6 +396,7 @@ class AboutPage(QWidget):
         self.release_button.setEnabled(False)
         self._set_channel_controls_enabled(False)
         self.latest_version_label.setText("확인 중…")
+        self._set_release_notes_preview("")
         selected_channel = self._update_channel
         channel_label = update_channel_label(selected_channel)
         self.update_status_label.setText(
@@ -393,6 +425,10 @@ class AboutPage(QWidget):
         self.latest_version_label.setText(latest_text)
         self.update_status_label.setText(result.message)
         self._release_url = result.release_url or RELEASES_PAGE_URL
+        self._set_release_notes_preview(
+            result.release_notes if result.update_available else "",
+            result.latest_version if result.update_available else "",
+        )
 
         if result.update_available and result.installer is not None:
             self.release_button.setText("업데이트 설치")
