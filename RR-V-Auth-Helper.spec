@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# RR-V Auth Helper 1.2.0
+# RR-V Auth Helper packaging spec
 #
 # This executable intentionally contains only the helper code and Python runtime.
 # nodriver itself is loaded at runtime from RR-V's WPC runtime directory so the
