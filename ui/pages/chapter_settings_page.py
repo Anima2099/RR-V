@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -25,12 +26,50 @@ from ui.widgets.common import create_card
 
 
 class UnifiedSettingsPage(_BaseSettingsPage):
-    """1.4 챕터와 빠른 추가 관련 다운로드 옵션을 설정 화면에 추가한다."""
+    """1.4 다운로드 기능과 설정 카테고리 구조를 제공한다."""
 
-    def _create_preset_tab(self):  # type: ignore[no-untyped-def]
-        # 공통 다운로드 동작과 프리셋 편집은 저장 계약이 서로 독립적이다.
-        # 기존 컨트롤/저장 메서드는 그대로 두고 표시 컨테이너만 두 페이지로
-        # 나눠, 긴 다운로드 설정 화면을 안전하게 압축한다.
+    _CATEGORY_TABS = (
+        (_BaseSettingsPage.GENERAL_TAB, "기본 설정"),
+        (_BaseSettingsPage.YOUTUBE_TAB, "사이트 연동"),
+        (_BaseSettingsPage.TOOLS_TAB, "프로그램 관리"),
+    )
+
+    def _create_tab_bar(self) -> QFrame:
+        tab_bar = QFrame()
+        tab_bar.setObjectName("toolTabBar")
+
+        tab_layout = QHBoxLayout(tab_bar)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.setSpacing(8)
+
+        self.tab_button_group = QButtonGroup(self)
+        self.tab_button_group.setExclusive(True)
+        self.tab_buttons: list[QPushButton] = []
+
+        for page_index, name in self._CATEGORY_TABS:
+            button = QPushButton(name)
+            button.setObjectName("toolTabButton")
+            button.setCheckable(True)
+            button.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
+            button.clicked.connect(
+                lambda checked=False, target=page_index:
+                self.show_settings_tab(target)
+            )
+            self.tab_button_group.addButton(button, page_index)
+            self.tab_buttons.append(button)
+            tab_layout.addWidget(button, 1)
+
+        return tab_bar
+
+    def _create_category_page(
+        self,
+        key: str,
+        names: tuple[str, ...],
+        pages: tuple[QWidget, ...],
+    ) -> QWidget:
         page = QWidget()
         page_layout = QVBoxLayout(page)
         page_layout.setContentsMargins(0, 0, 0, 0)
@@ -42,30 +81,56 @@ class UnifiedSettingsPage(_BaseSettingsPage):
         subtab_layout.setContentsMargins(10, 10, 10, 0)
         subtab_layout.setSpacing(8)
 
-        self.download_settings_subtab_group = QButtonGroup(self)
-        self.download_settings_subtab_group.setExclusive(True)
-        self.download_settings_subtab_buttons: list[QPushButton] = []
+        button_group = QButtonGroup(self)
+        button_group.setExclusive(True)
+        buttons: list[QPushButton] = []
 
-        for index, name in enumerate(("공통 설정", "다운로드 프리셋")):
+        stack = QStackedWidget()
+        stack.setObjectName("toolStack")
+        for child_page in pages:
+            stack.addWidget(child_page)
+
+        for index, name in enumerate(names):
             button = QPushButton(name)
-            # 기존의 작은 선택 버튼 스타일을 재사용해 최상위 설정 탭보다
-            # 한 단계 낮은 시각 계층을 유지하고 Light/Dark 테마를 함께 따른다.
             button.setObjectName("queueFilterButton")
             button.setCheckable(True)
-            button.setMinimumWidth(160)
+            button.setMinimumWidth(150)
             button.clicked.connect(
-                lambda checked=False, page_index=index:
-                self._show_download_settings_subtab(page_index)
+                lambda checked=False, group_key=key, sub_index=index:
+                self._show_category_subtab(group_key, sub_index)
             )
-            self.download_settings_subtab_group.addButton(button, index)
-            self.download_settings_subtab_buttons.append(button)
+            button_group.addButton(button, index)
+            buttons.append(button)
             subtab_layout.addWidget(button)
         subtab_layout.addStretch()
 
-        self.download_settings_substack = QStackedWidget()
-        self.download_settings_substack.setObjectName("toolStack")
+        if not hasattr(self, "settings_category_stacks"):
+            self.settings_category_stacks: dict[str, QStackedWidget] = {}
+            self.settings_category_buttons: dict[str, list[QPushButton]] = {}
+            self.settings_category_groups: dict[str, QButtonGroup] = {}
+        self.settings_category_stacks[key] = stack
+        self.settings_category_buttons[key] = buttons
+        self.settings_category_groups[key] = button_group
 
-        common_page = self._create_scroll_page(
+        page_layout.addWidget(subtab_bar, 0)
+        page_layout.addWidget(stack, 1)
+
+        buttons[0].setChecked(True)
+        stack.setCurrentIndex(0)
+        return page
+
+    def _create_general_tab(self):  # type: ignore[no-untyped-def]
+        general_page = super()._create_general_tab()
+        download_page = self._create_download_settings_page()
+        preset_page = self._create_download_preset_page()
+        return self._create_category_page(
+            "basic",
+            ("일반 설정", "다운로드 설정", "다운로드 프리셋"),
+            (general_page, download_page, preset_page),
+        )
+
+    def _create_download_settings_page(self):  # type: ignore[no-untyped-def]
+        return self._create_scroll_page(
             [
                 self._create_download_folder_card(),
                 self._create_quick_add_behavior_card(),
@@ -74,29 +139,106 @@ class UnifiedSettingsPage(_BaseSettingsPage):
                 self._create_download_common_save_bar(),
             ]
         )
-        preset_page = self._create_scroll_page(
+
+    def _create_download_preset_page(self):  # type: ignore[no-untyped-def]
+        return self._create_scroll_page(
             [
                 self._create_download_preferences_card(),
             ]
         )
-        self.download_settings_substack.addWidget(common_page)
-        self.download_settings_substack.addWidget(preset_page)
 
-        page_layout.addWidget(subtab_bar, 0)
-        page_layout.addWidget(self.download_settings_substack, 1)
+    def _create_preset_tab(self):  # type: ignore[no-untyped-def]
+        # 기본 SettingsPage의 고정 6칸 stack 인덱스 호환용 자리다.
+        # 실제 프리셋 화면은 '기본 설정' 내부 세 번째 탭에 한 번만 생성한다.
+        return QWidget()
 
-        self.download_settings_subtab_buttons[0].setChecked(True)
-        self.download_settings_substack.setCurrentIndex(0)
-        return page
+    def _create_youtube_tab(self):  # type: ignore[no-untyped-def]
+        auth_page = super()._create_youtube_tab()
+        integration_page = super()._create_integration_tab()
+        return self._create_category_page(
+            "site",
+            ("인증 관리", "확장 프로그램"),
+            (auth_page, integration_page),
+        )
 
-    def _show_download_settings_subtab(self, index: int) -> None:
-        if not hasattr(self, "download_settings_substack"):
+    def _create_integration_tab(self):  # type: ignore[no-untyped-def]
+        # 실제 브라우저 확장 화면은 '사이트 연동' 내부에 생성한다.
+        return QWidget()
+
+    def _create_tools_tab(self):  # type: ignore[no-untyped-def]
+        tools_page = super()._create_tools_tab()
+        backup_page = super()._create_backup_tab()
+        return self._create_category_page(
+            "program",
+            ("도구 및 리소스", "백업 및 복구"),
+            (tools_page, backup_page),
+        )
+
+    def _create_backup_tab(self):  # type: ignore[no-untyped-def]
+        # 실제 백업 화면은 '프로그램 관리' 내부에 생성한다.
+        return QWidget()
+
+    def _show_category_subtab(self, key: str, index: int) -> None:
+        stacks = getattr(self, "settings_category_stacks", {})
+        buttons_by_key = getattr(self, "settings_category_buttons", {})
+        stack = stacks.get(key)
+        buttons = buttons_by_key.get(key, [])
+        if stack is None or not buttons:
             return
-        if index < 0 or index >= self.download_settings_substack.count():
+        if index < 0 or index >= stack.count():
             index = 0
-        self.download_settings_substack.setCurrentIndex(index)
-        if hasattr(self, "download_settings_subtab_buttons"):
-            self.download_settings_subtab_buttons[index].setChecked(True)
+
+        stack.setCurrentIndex(index)
+        buttons[index].setChecked(True)
+
+        if key == "basic":
+            if index == 0 and hasattr(self, "theme_light_radio"):
+                self._reload_theme_preferences_to_controls()
+            elif index == 2 and hasattr(self, "preset_combo"):
+                self._load_preferences_into_controls()
+        elif key == "site":
+            if index == 0 and hasattr(self, "youtube_auth_status_label"):
+                self._refresh_youtube_auth_status()
+                if hasattr(self, "instagram_auth_status_label"):
+                    self._refresh_instagram_auth_status()
+                if hasattr(self, "tiktok_auth_status_label"):
+                    self._refresh_tiktok_auth_status()
+            elif index == 1 and hasattr(self, "browser_integration_status_label"):
+                self._refresh_browser_integration_status()
+        elif key == "program":
+            if index == 0 and hasattr(self, "tool_status_labels"):
+                self._refresh_tool_status()
+                if not getattr(self, "_tools_tab_checked_once", False):
+                    self._tools_tab_checked_once = True
+                    self.start_component_update_check(force=True, notify=False)
+            elif index == 1 and hasattr(self, "backup_status_label"):
+                self._refresh_backup_status()
+
+    def show_settings_tab(self, index: int) -> None:
+        if not hasattr(self, "settings_stack"):
+            return
+
+        # 기존 코드가 여섯 개의 과거 탭 인덱스를 직접 호출해도 같은 화면으로
+        # 안전하게 연결한다. 새 상단 UI에는 세 개의 카테고리만 노출한다.
+        legacy_routes = {
+            self.GENERAL_TAB: (self.GENERAL_TAB, "basic", 0),
+            self.PRESET_TAB: (self.GENERAL_TAB, "basic", 2),
+            self.YOUTUBE_TAB: (self.YOUTUBE_TAB, "site", 0),
+            self.INTEGRATION_TAB: (self.YOUTUBE_TAB, "site", 1),
+            self.TOOLS_TAB: (self.TOOLS_TAB, "program", 0),
+            self.BACKUP_TAB: (self.TOOLS_TAB, "program", 1),
+        }
+        category_index, key, sub_index = legacy_routes.get(
+            index,
+            legacy_routes[self.GENERAL_TAB],
+        )
+
+        self.settings_stack.setCurrentIndex(category_index)
+        for button in self.tab_buttons:
+            button.setChecked(
+                self.tab_button_group.id(button) == category_index
+            )
+        self._show_category_subtab(key, sub_index)
 
     def _create_quick_add_behavior_card(self):  # type: ignore[no-untyped-def]
         card, layout = create_card()
