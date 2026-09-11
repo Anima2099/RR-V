@@ -26,6 +26,22 @@ class CleanUpgradeInstallerContractTests(unittest.TestCase):
             self.installer,
         )
 
+    def test_fresh_install_detection_never_expands_app_during_initialize_wizard(self) -> None:
+        detector = self.installer.split(
+            "function IsPreviousInstallPresent: Boolean;", 1
+        )[1].split("procedure InitializeWizard;", 1)[0]
+        initialize = self.installer.split("procedure InitializeWizard;", 1)[1].split(
+            "function ShouldSkipPage", 1
+        )[0]
+
+        self.assertIn("RegKeyExists(HKCU, RRVUninstallKey)", detector)
+        self.assertNotIn("ExpandConstant('{app}", detector)
+        self.assertNotIn("ExpandConstant('{app}", initialize)
+        self.assertIn(
+            "PreviousInstallDetected := IsPreviousInstallPresent;",
+            initialize,
+        )
+
     def test_reset_is_opt_in_and_preserves_data_by_default(self) -> None:
         self.assertIn(
             "ResetUserDataOnUpgrade := PreviousInstallDetected and",
