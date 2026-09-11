@@ -98,10 +98,12 @@ Expected output:
 4. Run the new Installer over that installation with the reset option **unchecked**.
 5. Confirm the stale sentinel file is removed from the application directory while `%LOCALAPPDATA%\RR-V` and `%APPDATA%\RR-V` survive.
 6. Launch RR-V and verify the preserved settings/preset/login state and existing runtime tools are still recognized.
-7. Verify one lightweight YouTube download and any relevant browser integration.
-8. Re-create identifiable RR-V user/runtime data, then run the Installer again with `설정, 로그인, 프리셋 및 다운로드 도구도 초기화` **checked**.
-9. Confirm `%LOCALAPPDATA%\RR-V` and `%APPDATA%\RR-V` are removed before RR-V's first post-install launch recreates only the normal fresh-start directories/settings.
-10. Confirm old startup/Native Messaging registrations are removed by the reset path.
-11. Confirm user-downloaded media in an external save folder is untouched in both upgrade modes.
-12. Uninstall once with user-data deletion unchecked and confirm RR-V data survives.
-13. Reinstall, then uninstall with user-data deletion checked and confirm both RR-V data directories are removed.
+7. Verify the new Settings hierarchy (`기본 설정 / 사이트 연동 / 프로그램 관리`) and its internal tabs are present in the installed EXE.
+8. Verify manual Quick Add still queues normally with auto-download off, then enable `빠른 추가 후 자동으로 다운로드 시작` and confirm an idle queue starts automatically without parallel downloading.
+9. Verify one lightweight YouTube download and any relevant browser integration.
+10. Re-create identifiable RR-V user/runtime data, then run the Installer again with `설정, 로그인, 프리셋 및 다운로드 도구도 초기화` **checked**.
+11. Confirm `%LOCALAPPDATA%\RR-V` and `%APPDATA%\RR-V` are removed before RR-V's first post-install launch recreates only the normal fresh-start directories/settings.
+12. Confirm old startup/Native Messaging registrations are removed by the reset path.
+13. Confirm user-downloaded media in an external save folder is untouched in both upgrade modes.
+14. Uninstall once with user-data deletion unchecked and confirm RR-V data survives.
+15. Reinstall, then uninstall with user-data deletion checked and confirm both RR-V data directories are removed.
