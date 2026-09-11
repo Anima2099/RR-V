@@ -127,23 +127,62 @@ class DownloadSettingsLayoutTests(unittest.TestCase):
         )
 
 
-class RuntimeDownloadSettingsSubtabTests(unittest.TestCase):
-    def test_runtime_download_settings_has_two_exclusive_subtabs(self) -> None:
-        method = _class_method_source(
-            RUNTIME_PAGE,
-            "UnifiedSettingsPage",
-            "_create_preset_tab",
+class RuntimeSettingsCategoryTests(unittest.TestCase):
+    def test_top_level_navigation_is_reduced_to_three_categories(self) -> None:
+        source = RUNTIME_PAGE.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(RUNTIME_PAGE))
+        page_class = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "UnifiedSettingsPage"
         )
-        self.assertIn('("공통 설정", "다운로드 프리셋")', method)
-        self.assertIn("QButtonGroup(self)", method)
-        self.assertIn("setExclusive(True)", method)
-        self.assertIn("QStackedWidget()", method)
+        assignment = next(
+            node
+            for node in page_class.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "_CATEGORY_TABS"
+                for target in node.targets
+            )
+        )
+        labels = [
+            node.value
+            for node in ast.walk(assignment)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        ]
+        self.assertEqual(labels, ["기본 설정", "사이트 연동", "프로그램 관리"])
 
-    def test_common_subtab_card_order_matches_ui_contract(self) -> None:
+    def test_basic_settings_has_three_expected_subtabs(self) -> None:
         method = _class_method_source(
             RUNTIME_PAGE,
             "UnifiedSettingsPage",
-            "_create_preset_tab",
+            "_create_general_tab",
+        )
+        self.assertIn(
+            '("일반 설정", "다운로드 설정", "다운로드 프리셋")',
+            method,
+        )
+        self.assertIn('"basic"', method)
+
+    def test_site_and_program_categories_keep_expected_subtabs(self) -> None:
+        site = _class_method_source(
+            RUNTIME_PAGE,
+            "UnifiedSettingsPage",
+            "_create_youtube_tab",
+        )
+        program = _class_method_source(
+            RUNTIME_PAGE,
+            "UnifiedSettingsPage",
+            "_create_tools_tab",
+        )
+        self.assertIn('("인증 관리", "확장 프로그램")', site)
+        self.assertIn('("도구 및 리소스", "백업 및 복구")', program)
+
+    def test_download_settings_card_order_matches_ui_contract(self) -> None:
+        method = _class_method_source(
+            RUNTIME_PAGE,
+            "UnifiedSettingsPage",
+            "_create_download_settings_page",
         )
         calls = (
             "_create_download_folder_card()",
@@ -155,34 +194,51 @@ class RuntimeDownloadSettingsSubtabTests(unittest.TestCase):
         positions = [method.index(call) for call in calls]
         self.assertEqual(positions, sorted(positions))
 
-    def test_preset_editor_is_isolated_on_second_subtab(self) -> None:
+    def test_category_entry_defaults_preserve_refresh_contracts(self) -> None:
         method = _class_method_source(
             RUNTIME_PAGE,
             "UnifiedSettingsPage",
-            "_create_preset_tab",
+            "_show_category_subtab",
         )
-        common_start = method.index("common_page =")
-        preset_start = method.index("preset_page =")
-        preset_card = method.index("_create_download_preferences_card()")
-        self.assertLess(common_start, preset_start)
-        self.assertGreater(preset_card, preset_start)
+        self.assertIn("_reload_theme_preferences_to_controls", method)
+        self.assertIn("_load_preferences_into_controls", method)
+        self.assertIn("_refresh_youtube_auth_status", method)
+        self.assertIn("_refresh_browser_integration_status", method)
+        self.assertIn("_refresh_tool_status", method)
+        self.assertIn("start_component_update_check(force=True, notify=False)", method)
+        self.assertIn("_refresh_backup_status", method)
 
-    def test_common_subtab_is_default_and_invalid_index_falls_back_to_it(self) -> None:
-        create_method = _class_method_source(
-            RUNTIME_PAGE,
-            "UnifiedSettingsPage",
-            "_create_preset_tab",
-        )
+    def test_program_management_defaults_to_tools_and_checks_updates_once(self) -> None:
         show_method = _class_method_source(
             RUNTIME_PAGE,
             "UnifiedSettingsPage",
-            "_show_download_settings_subtab",
+            "show_settings_tab",
         )
-        self.assertIn("download_settings_subtab_buttons[0].setChecked(True)", create_method)
-        self.assertIn("download_settings_substack.setCurrentIndex(0)", create_method)
-        self.assertIn("if index < 0 or index >= self.download_settings_substack.count():", show_method)
-        self.assertIn("index = 0", show_method)
-        self.assertIn("setCurrentIndex(index)", show_method)
+        subtab_method = _class_method_source(
+            RUNTIME_PAGE,
+            "UnifiedSettingsPage",
+            "_show_category_subtab",
+        )
+        self.assertIn(
+            'self.TOOLS_TAB: (self.TOOLS_TAB, "program", 0)',
+            show_method,
+        )
+        self.assertIn("_tools_tab_checked_once", subtab_method)
+        self.assertIn("start_component_update_check(force=True, notify=False)", subtab_method)
+
+    def test_legacy_six_tab_routes_still_land_on_new_subtabs(self) -> None:
+        method = _class_method_source(
+            RUNTIME_PAGE,
+            "UnifiedSettingsPage",
+            "show_settings_tab",
+        )
+        expected_routes = (
+            'self.PRESET_TAB: (self.GENERAL_TAB, "basic", 2)',
+            'self.INTEGRATION_TAB: (self.YOUTUBE_TAB, "site", 1)',
+            'self.BACKUP_TAB: (self.TOOLS_TAB, "program", 1)',
+        )
+        for route in expected_routes:
+            self.assertIn(route, method)
 
 
 if __name__ == "__main__":
