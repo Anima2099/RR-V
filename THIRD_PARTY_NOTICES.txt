@@ -1,9 +1,10 @@
-RR-V 1.2.0 - THIRD-PARTY NOTICES
-=================================
+RR-V - THIRD-PARTY NOTICES
+==========================
 
-This document identifies third-party software used by RR-V 1.2.0 and explains
-whether each component is bundled with RR-V or downloaded separately after
-installation.
+This document identifies third-party software used by RR-V and explains whether
+each component is bundled with RR-V or downloaded separately after installation.
+Exact build-time versions are recorded in the release licenses directory by
+BUILD_RELEASE.ps1 where applicable.
 
 This notice does not change the license of the RR-V core application. Unless a
 file or directory states otherwise, the RR-V core source code and original
@@ -14,7 +15,7 @@ assets are not offered under an open-source redistribution license.
 -------------------------------
 
 Python runtime
-  Component: CPython 3.14.x runtime used for the release build
+  Component: CPython runtime used for the release build
   License: Python Software Foundation License Version 2 (PSF-2.0)
   Project: https://www.python.org/
   Source: https://github.com/python/cpython
@@ -88,10 +89,10 @@ YouTube WPC / browser-authentication runtime
 2. COMPONENTS NOT BUNDLED IN THE RR-V INSTALLER
 ------------------------------------------------
 
-Starting with RR-V 1.2.0, the following external executables are intentionally
-not included in the RR-V onedir package or Installer. When the user chooses to
-install required components, RR-V downloads them from their official distribution
-sources into the user's LocalAppData RR-V tools directory.
+RR-V does not include the following external executables in the onedir package
+or Installer. When the user chooses to install required components, RR-V downloads
+them from their official distribution sources into the user's LocalAppData RR-V
+tools directory.
 
 yt-dlp Nightly Windows executable
   Project: https://github.com/yt-dlp/yt-dlp
@@ -144,6 +145,10 @@ BUILD_RELEASE.ps1. It is intended to contain:
 
 The bundled nodriver and yt-dlp-getpot-wpc Python sources are also present inside
 RR-V's WPC runtime itself.
+
+The public RR-V repository is available at:
+
+  https://github.com/Anima2099/RR-V
 
 For source-code requests concerning LGPL/AGPL-covered components distributed by
 RR-V, see SOURCE_OFFER.txt or contact:
