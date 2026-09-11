@@ -95,10 +95,10 @@ powershell -ExecutionPolicy Bypass -File .\BUILD_INSTALLER.ps1
 
 The script reads the current `APP_VERSION`, verifies the Inno Setup version matches, generates the Clean Upgrade install manifest, compiles the Installer, and prints its SHA-256 hash.
 
-For RR-V 1.4.0 the expected file is:
+Expected output:
 
 ```text
-installer-output\RR-V_Setup_1.4.0.exe
+installer-output\RR-V_Setup_<APP_VERSION>.exe
 ```
 
 Before a public release, follow `PACKAGING_CHECKLIST.txt` and `installer/README.md`.
