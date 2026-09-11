@@ -8,11 +8,11 @@
 
 **RR-V**는 널리 사용되는 오픈소스 영상 다운로드 도구 **yt-dlp**를 복잡한 명령어 없이 쉽고 빠르게 사용할 수 있도록 만든 Windows용 비디오 다운로드 & 미디어 도구입니다.
 
-**현재 버전: 1.4.0 Community Beta**
+**현재 버전: 1.4.1 Community Beta**
 
 ➡️ **[최신 버전 다운로드 · GitHub Releases](https://github.com/Anima2099/RR-V/releases)**
 
-설치 파일은 GitHub Releases에서 `RR-V_Setup_1.4.0.exe` 형태로 배포합니다.
+설치 파일은 GitHub Releases에서 `RR-V_Setup_1.4.1.exe` 형태로 배포합니다.
 
 ---
 
@@ -166,7 +166,7 @@ RR-V에는 Chrome / Edge용 **RR-V Browser Connector**가 포함되어 있습니
 
 ## Community Beta
 
-RR-V 1.4.0은 **Community Beta** 버전입니다.
+RR-V 1.4.1은 **Community Beta** 버전이며, 1.4.0 신규 설치 시 일부 환경에서 발생할 수 있던 Installer 초기화 오류를 수정한 핫픽스입니다.
 
 설치와 업그레이드, 사용자 데이터 보존/초기화, 영상 다운로드, 빠른 추가 자동 다운로드, 사이트 인증, Browser Connector, 미디어 도구 및 자체 업데이트 등의 주요 동작은 실제 Windows 환경에서 테스트를 거쳤습니다.
 
@@ -326,10 +326,10 @@ After installing Inno Setup 7, create the Installer with:
 powershell -ExecutionPolicy Bypass -File .\BUILD_INSTALLER.ps1
 ```
 
-For RR-V 1.4.0 the expected output is:
+Expected output:
 
 ```text
-installer-output\RR-V_Setup_1.4.0.exe
+installer-output\RR-V_Setup_<APP_VERSION>.exe
 ```
 
 `BUILD_RELEASE.ps1` builds the Auth Helper and RR-V, places the helper beside `RR-V.exe`, verifies that yt-dlp / FFmpeg / FFprobe / Deno were not accidentally bundled, and collects release license/source materials.
@@ -368,4 +368,4 @@ External yt-dlp / FFmpeg / Deno executables downloaded after installation remain
 
 ## Project Status
 
-Version-specific development and release preparation may take place on version branches such as `1.4.0-community-beta`. The `main` branch is used as the public release source line, while previous tagged releases remain available through GitHub Releases and their preserved refs.
+Version-specific development and release preparation may take place on version branches such as `<version>-community-beta`. The `main` branch is used as the public release source line, while previous tagged releases remain available through GitHub Releases and their preserved refs.
