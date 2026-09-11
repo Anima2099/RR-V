@@ -40,10 +40,10 @@ class ManualQuickAddAutoDownloadTests(unittest.TestCase):
 
     def test_download_settings_exposes_global_quick_add_option(self) -> None:
         source = RUNTIME_SETTINGS_PATH.read_text(encoding="utf-8")
-        preset_tab = _method_source(
+        download_settings_page = _method_source(
             RUNTIME_SETTINGS_PATH,
             "UnifiedSettingsPage",
-            "_create_preset_tab",
+            "_create_download_settings_page",
         )
         save_method = _method_source(
             RUNTIME_SETTINGS_PATH,
@@ -52,21 +52,16 @@ class ManualQuickAddAutoDownloadTests(unittest.TestCase):
         )
 
         self.assertIn("빠른 추가 후 자동으로 다운로드 시작", source)
-        self.assertIn("_create_quick_add_behavior_card", preset_tab)
+        self.assertIn("_create_quick_add_behavior_card", download_settings_page)
         self.assertIn("quick_add_auto_download", save_method)
         self.assertIn("save_general_preferences", save_method)
 
-    def test_download_settings_split_common_and_preset_pages(self) -> None:
-        preset_tab = _method_source(
+    def test_download_settings_keeps_requested_common_card_order(self) -> None:
+        method = _method_source(
             RUNTIME_SETTINGS_PATH,
             "UnifiedSettingsPage",
-            "_create_preset_tab",
+            "_create_download_settings_page",
         )
-
-        self.assertIn('("공통 설정", "다운로드 프리셋")', preset_tab)
-        self.assertIn("QStackedWidget", preset_tab)
-        self.assertIn("download_settings_substack", preset_tab)
-
         common_order = (
             "_create_download_folder_card()",
             "_create_quick_add_behavior_card()",
@@ -74,11 +69,8 @@ class ManualQuickAddAutoDownloadTests(unittest.TestCase):
             "_create_filename_template_card()",
             "_create_download_common_save_bar()",
         )
-        positions = [preset_tab.index(call) for call in common_order]
+        positions = [method.index(call) for call in common_order]
         self.assertEqual(positions, sorted(positions))
-
-        preset_position = preset_tab.index("_create_download_preferences_card()")
-        self.assertGreater(preset_position, positions[-1])
 
     def test_manual_quick_add_only_arms_auto_flow_when_setting_is_enabled(self) -> None:
         quick_add = _method_source(
