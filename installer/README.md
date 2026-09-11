@@ -17,6 +17,8 @@ RR-V uses Inno Setup 7 to build a per-user Windows Installer.
 
 When an existing RR-V installation is detected, the Installer shows an `RR-V 업데이트 옵션` page. Normal upgrade is intentionally conservative:
 
+- During early wizard initialization, previous-install detection relies on RR-V's Windows uninstall registration and does not expand the Inno Setup `{app}` constant before the destination is initialized.
+- The selected application path is inspected only after `{app}` is available at install time.
 - The new application package is installed first.
 - `BUILD_INSTALLER.ps1` generates `RRV_INSTALL_MANIFEST.txt` from the exact `dist\RR-V` payload included in the Installer.
 - After the new package is in place, files under the selected RR-V application directory that are not present in the new manifest are removed as stale application files.
@@ -92,18 +94,20 @@ Expected output:
 
 ## Installer smoke test
 
-1. Confirm a fresh install does not show the `RR-V 업데이트 옵션` page.
+1. Start from a state where Windows Installed Apps has no RR-V entry and confirm the Installer opens without an `{app}`-initialization runtime error and does not show the `RR-V 업데이트 옵션` page.
 2. Install without administrator elevation and verify the normal shortcuts/program registration.
-3. Prepare an existing RR-V install with known settings, a preset/login state if appropriate, installed runtime tools, and a harmless stale sentinel file inside the RR-V application directory.
-4. Run the new Installer over that installation with the reset option **unchecked**.
-5. Confirm the stale sentinel file is removed from the application directory while `%LOCALAPPDATA%\RR-V` and `%APPDATA%\RR-V` survive.
-6. Launch RR-V and verify the preserved settings/preset/login state and existing runtime tools are still recognized.
-7. Verify the new Settings hierarchy (`기본 설정 / 사이트 연동 / 프로그램 관리`) and its internal tabs are present in the installed EXE.
-8. Verify manual Quick Add still queues normally with auto-download off, then enable `빠른 추가 후 자동으로 다운로드 시작` and confirm an idle queue starts automatically without parallel downloading.
-9. Verify one lightweight YouTube download and any relevant browser integration.
-10. Re-create identifiable RR-V user/runtime data, then run the Installer again with `설정, 로그인, 프리셋 및 다운로드 도구도 초기화` **checked**.
-11. Confirm `%LOCALAPPDATA%\RR-V` and `%APPDATA%\RR-V` are removed before RR-V's first post-install launch recreates only the normal fresh-start directories/settings.
-12. Confirm old startup/Native Messaging registrations are removed by the reset path.
-13. Confirm user-downloaded media in an external save folder is untouched in both upgrade modes.
-14. Uninstall once with user-data deletion unchecked and confirm RR-V data survives.
-15. Reinstall, then uninstall with user-data deletion checked and confirm both RR-V data directories are removed.
+3. Launch RR-V and verify the expected application version. If RR-V user data was intentionally preserved from an earlier uninstall, confirm those settings/authentication/tools are recognized normally.
+4. Exit RR-V completely, including the system tray, and run the same Installer again. Confirm the existing installation is detected and the `RR-V 업데이트 옵션` page appears with the reset checkbox off by default.
+5. Prepare an existing RR-V install with known settings, a preset/login state if appropriate, installed runtime tools, and a harmless stale sentinel file inside the RR-V application directory.
+6. Run the new Installer over that installation with the reset option **unchecked**.
+7. Confirm the stale sentinel file is removed from the application directory while `%LOCALAPPDATA%\RR-V` and `%APPDATA%\RR-V` survive.
+8. Launch RR-V and verify the preserved settings/preset/login state and existing runtime tools are still recognized.
+9. Verify the new Settings hierarchy (`기본 설정 / 사이트 연동 / 프로그램 관리`) and its internal tabs are present in the installed EXE.
+10. Verify manual Quick Add still queues normally with auto-download off, then enable `빠른 추가 후 자동으로 다운로드 시작` and confirm an idle queue starts automatically without parallel downloading.
+11. Verify one lightweight YouTube download and any relevant browser integration.
+12. Re-create identifiable RR-V user/runtime data, then run the Installer again with `설정, 로그인, 프리셋 및 다운로드 도구도 초기화` **checked**.
+13. Confirm `%LOCALAPPDATA%\RR-V` and `%APPDATA%\RR-V` are removed before RR-V's first post-install launch recreates only the normal fresh-start directories/settings.
+14. Confirm old startup/Native Messaging registrations are removed by the reset path.
+15. Confirm user-downloaded media in an external save folder is untouched in both upgrade modes.
+16. Uninstall once with user-data deletion unchecked and confirm RR-V data survives.
+17. Reinstall, then uninstall with user-data deletion checked and confirm both RR-V data directories are removed.
