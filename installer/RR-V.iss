@@ -1,5 +1,5 @@
 #define MyAppName "RR-V"
-#define MyAppVersion "1.4.0"
+#define MyAppVersion "1.4.1"
 #define MyAppPublisher "Anima2099"
 #define MyAppURL "https://github.com/Anima2099/RR-V"
 #define MyAppExeName "RR-V.exe"
@@ -179,8 +179,10 @@ var
 
 function IsPreviousInstallPresent: Boolean;
 begin
-  Result := RegKeyExists(HKCU, RRVUninstallKey) or
-    FileExists(ExpandConstant('{app}\RR-V.exe'));
+  // InitializeWizard에서는 {app} 상수가 아직 초기화되지 않은 신규 설치 환경이
+  // 있으므로 Windows의 기존 RR-V 설치 등록 정보만 확인한다. 실제 설치 경로의
+  // RR-V.exe 존재 여부는 {app}가 준비된 ssInstall 단계에서 다시 확인한다.
+  Result := RegKeyExists(HKCU, RRVUninstallKey);
 end;
 
 procedure InitializeWizard;
