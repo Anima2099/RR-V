@@ -27,7 +27,7 @@ The RR-V-specific source code in this `auth_helper` directory is licensed under 
 
 See `LICENSE_NOTICE.txt` in this directory for the component license notice. `nodriver` is independently distributed under GNU AGPL v3.0 and retains its own copyright and license notices.
 
-The RR-V release build copies this helper source and build specification into the release `licenses/RR-V-Auth-Helper-source/` directory so recipients have the preferred source form even when the main RR-V repository is not yet publicly accessible.
+The RR-V release build copies this helper source and build specification into the release `licenses/RR-V-Auth-Helper-source/` directory so recipients receive the preferred source form with the packaged application. The same source is also available in the public RR-V repository.
 
 The bundled nodriver source is also present in RR-V's WPC runtime as Python source.
 
