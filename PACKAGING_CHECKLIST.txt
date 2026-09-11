@@ -115,7 +115,7 @@ Clean upgrade regression: 1.3.0 -> 1.4.0
 [ ] RR-V launches and displays Version 1.4.0
 [ ] Existing preset/settings are still selected after launch
 [ ] Existing authentication is still recognized where valid
-[ ] Tools & Resources recognizes the existing yt-dlp / FFmpeg / FFprobe / Deno and WPC runtime
+[ ] Settings > 프로그램 관리 > 도구 및 리소스 recognizes the existing yt-dlp / FFmpeg / FFprobe / Deno and WPC runtime
 [ ] One lightweight YouTube information lookup and download succeeds
 [ ] Browser Connector still works or can be re-registered normally
 [ ] A user-downloaded media file outside RR-V data/program directories remains untouched
@@ -128,13 +128,13 @@ Destructive reset upgrade regression
 [ ] Old RR-V settings/cookies/presets/tools/runtime are removed
 [ ] RR-V startup and Native Messaging registrations from the old data state are removed
 [ ] Post-install RR-V launch recreates only normal fresh-start data
-[ ] Tools & Resources reports missing external tools and allows fresh installation
+[ ] Settings > 프로그램 관리 > 도구 및 리소스 reports missing external tools and allows fresh installation
 [ ] External user media sentinel remains untouched
 [ ] After reinstalling required tools, one lightweight download succeeds
 
 Fresh-install runtime tool regression
 [ ] Start with %LOCALAPPDATA%\RR-V\tools containing no yt-dlp / ffmpeg / ffprobe / deno
-[ ] Settings > Tools & Resources shows the missing tools clearly
+[ ] Settings > 프로그램 관리 > 도구 및 리소스 shows the missing tools clearly
 [ ] The primary action changes to "필수 구성요소 설치"
 [ ] yt-dlp Nightly downloads from the official release source and passes execution verification
 [ ] FFmpeg / FFprobe Release Essentials downloads, passes SHA-256/version verification, and installs as a pair
@@ -144,7 +144,7 @@ Fresh-install runtime tool regression
 [ ] A real video information lookup/download succeeds after first-time tool installation
 
 YouTube / site authentication regression
-[ ] Settings > Site Authentication offers Google Chrome and Microsoft Edge only
+[ ] Settings > 사이트 연동 > 인증 관리 offers Google Chrome and Microsoft Edge only
 [ ] RR-V.exe finds RR-V-Auth-Helper.exe beside it in the onedir root
 [ ] A fresh Chrome YouTube login saves authentication successfully
 [ ] A fresh Edge YouTube login saves authentication successfully
@@ -161,12 +161,17 @@ YouTube / site authentication regression
 UI regression
 [ ] Version display shows 1.4.0
 [ ] Light and dark Warm Sage themes both render normally
-[ ] Settings contains the expected tabs and no duplicate Program Information tab
+[ ] Settings top-level navigation shows exactly 기본 설정 / 사이트 연동 / 프로그램 관리
+[ ] 기본 설정 opens 일반 설정 first and exposes 일반 설정 / 다운로드 설정 / 다운로드 프리셋
+[ ] 사이트 연동 opens 인증 관리 first and exposes 인증 관리 / 확장 프로그램
+[ ] 프로그램 관리 opens 도구 및 리소스 first and exposes 도구 및 리소스 / 백업 및 복구
+[ ] Entering 프로그램 관리 still refreshes tool status and performs the automatic component update check once per session
+[ ] Moving repeatedly between top-level and internal settings tabs does not reset unsaved controls, duplicate content, or crash
 [ ] Sidebar Program Information sits directly above Version 1.4.0 in the lower app-info area
 [ ] Program Information shows RR-V version, update check, Release Notes preview, developer/contact, GitHub, support, and license/source links
-[ ] Tools & Resources shows yt-dlp / FFmpeg / Deno / YouTube authentication runtime status
-[ ] Tools & Resources can install missing external runtime tools
-[ ] Tools & Resources can bring installed tools to the supported latest state
+[ ] Settings > 프로그램 관리 > 도구 및 리소스 shows yt-dlp / FFmpeg / Deno / YouTube authentication runtime status
+[ ] Settings > 프로그램 관리 > 도구 및 리소스 can install missing external runtime tools
+[ ] Settings > 프로그램 관리 > 도구 및 리소스 can bring installed tools to the supported latest state
 [ ] Explorer / title bar / taskbar / Alt+Tab show the RR-V icon
 
 Core regression
@@ -180,6 +185,11 @@ Core regression
 [ ] Browser Connector Native Messaging fallback starts RR-V correctly from a fully stopped state
 [ ] Video information lookup works
 [ ] Quick add and playlist/batch add work
+[ ] Settings > 기본 설정 > 다운로드 설정 exposes "빠른 추가 후 자동으로 다운로드 시작" and it defaults OFF for a fresh preference state
+[ ] With Quick Add auto-download OFF, manual Quick Add stops at the normal queued state
+[ ] With Quick Add auto-download ON and RR-V idle, the sequential download queue starts automatically after information lookup
+[ ] If a download is already active, Quick Add auto-download never starts a parallel download or jumps ahead of the existing queue
+[ ] Quick Add auto-download preference survives restart
 [ ] Browser link handling can be switched between queue-only and queue + automatic download
 [ ] Browser automatic-download preference survives restart
 [ ] Filename template/token output works
