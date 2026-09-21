@@ -106,6 +106,22 @@ class LogResilienceTests(unittest.TestCase):
                 finally:
                     module._INITIALIZED = original_initialized
 
+    def test_startup_diagnostics_use_fail_soft_console_output(self) -> None:
+        source = (
+            Path(__file__).resolve().parents[1] / "app" / "application.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("def _safe_console_print", source)
+        self.assertEqual(source.count("print("), 1)
+        self.assertIn(
+            '_safe_console_print(f"RR-V performance log: {performance_log_path()}")',
+            source,
+        )
+        self.assertIn(
+            '_safe_console_print(f"RR-V download log: {download_log_path()}")',
+            source,
+        )
+
     def test_performance_log_is_fail_soft_for_console_and_file_errors(self) -> None:
         encoding_error = UnicodeEncodeError(
             "cp949",
