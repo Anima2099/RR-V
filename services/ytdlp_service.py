@@ -327,21 +327,22 @@ class YtDlpService:
         ordered = sorted(heights, reverse=True)
         return tuple(f"{height}p" for height in ordered)
 
+    @classmethod
+    def is_regular_subtitle_key(cls, value: object) -> bool:
+        language = str(value or "").strip()
+        if not language:
+            return False
+        normalized = re.sub(
+            r"[\s-]+",
+            "_",
+            language.casefold(),
+        )
+        return normalized not in cls._NON_CAPTION_SUBTITLE_KEYS
+
     @staticmethod
     def _extract_subtitle_languages(
         info: dict[str, Any],
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        def is_regular_caption_key(value: object) -> bool:
-            language = str(value or "").strip()
-            if not language:
-                return False
-            normalized = re.sub(
-                r"[\s-]+",
-                "_",
-                language.casefold(),
-            )
-            return normalized not in YtDlpService._NON_CAPTION_SUBTITLE_KEYS
-
         def extract(key: str) -> tuple[str, ...]:
             tracks = info.get(key) or {}
             if not isinstance(tracks, dict):
@@ -349,7 +350,7 @@ class YtDlpService:
             languages = {
                 str(language).strip()
                 for language in tracks.keys()
-                if is_regular_caption_key(language)
+                if YtDlpService.is_regular_subtitle_key(language)
             }
             return tuple(sorted(languages, key=str.lower))
 
