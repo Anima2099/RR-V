@@ -183,7 +183,7 @@ Runtime tool update regression
 [ ] Tool update failure does not leave RR-V permanently locked from exiting
 
 YouTube / site authentication regression
-[ ] Settings > 사이트 연동 > 인증 관리 offers installed Chrome / Edge / Vivaldi / Brave browsers where available
+[ ] Settings > 사이트 연동 > 인증 관리 offers installed Chrome / Edge browsers only
 [ ] RR-V.exe finds RR-V-Auth-Helper.exe beside it in the onedir root
 [ ] A fresh YouTube login saves authentication successfully
 [ ] Korean authentication status text is not corrupted across the Helper IPC boundary
