@@ -126,7 +126,7 @@ class SupportReportTests(unittest.TestCase):
             root / "ui" / "pages" / "download_page.py"
         ).read_text(encoding="utf-8")
         settings_source = (
-            root / "ui" / "pages" / "settings_page.py"
+            root / "ui" / "pages" / "theme_settings_page.py"
         ).read_text(encoding="utf-8")
 
         self.assertIn("problem_report_requested = Signal(str)", card_source)
@@ -141,7 +141,7 @@ class SupportReportTests(unittest.TestCase):
         self.assertIn("def _copy_problem_report", page_source)
         self.assertIn("QApplication.clipboard().setText(report)", page_source)
         self.assertIn(
-            "Chromium 브라우저 창이 잠시 열렸다가 자동으로 닫힐 수 있으며 정상 동작입니다.",
+            "Chrome·Edge·Vivaldi·Brave 같은 Chromium 브라우저 창이 잠시 열렸다가",
             settings_source,
         )
 
