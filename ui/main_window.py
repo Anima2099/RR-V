@@ -461,6 +461,22 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
 
+        has_active_tool_action = bool(
+            getattr(self.settings_page, "has_active_tool_action", False)
+        )
+        if has_active_tool_action:
+            if not self.isVisible():
+                self._activate_existing_window()
+            show_warm_message(
+                self,
+                "도구 작업 중",
+                "필수 도구를 설치·업데이트·복구하고 있어 지금은 RR-V를 완전히 종료할 수 없습니다.\n"
+                "작업이 끝난 뒤 다시 종료해 주세요.",
+            )
+            self._force_exit = False
+            event.ignore()
+            return
+
         has_active_download = self.download_page.has_active_download
         has_active_conversion = self.media_tools_page.has_active_operation
         if (
