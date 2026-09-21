@@ -36,7 +36,7 @@
 ### 사이트 인증과 브라우저 연동
 
 - YouTube · Instagram · TikTok RR-V 관리형 로그인
-- Google Chrome · Microsoft Edge · Vivaldi · Brave 인증 브라우저 지원
+- Google Chrome · Microsoft Edge 인증 브라우저 지원
 - Chromium 기반 브라우저용 **RR-V Browser Connector**
 - RR-V 실행/트레이 상태에서는 빠른 로컬 연결, 완전 종료 상태에서는 Native Messaging 폴백
 - 브라우저 링크 전송 시 대기열 추가 또는 자동 다운로드 선택
@@ -136,7 +136,7 @@ RR-V는 현재 다음 사이트의 자체 로그인 기능을 제공합니다.
 
 **YouTube · Instagram · TikTok**
 
-지원되는 로그인 브라우저는 **Google Chrome · Microsoft Edge · Vivaldi · Brave**입니다.
+지원되는 로그인 브라우저는 **Google Chrome · Microsoft Edge**입니다.
 
 **설정 → 사이트 연동 → 인증 관리**에서 로그인할 수 있습니다. RR-V의 전용 로그인 창에서 해당 사이트에 로그인하면 인증 정보를 저장하여 이후 정보 확인과 다운로드에 사용합니다.
 
@@ -159,7 +159,7 @@ RR-V에는 Chromium 기반 브라우저용 **RR-V Browser Connector**가 포함�
 ## 지원 환경
 
 - **Windows 10 / Windows 11 · 64-bit**
-- 사이트 인증 브라우저: **Google Chrome · Microsoft Edge · Vivaldi · Brave**
+- 사이트 인증 브라우저: **Google Chrome · Microsoft Edge**
 - Browser Connector: Chromium 기반 브라우저 환경을 기본 지원
 
 영상 사이트의 정책 또는 구조 변경, yt-dlp의 현재 지원 상태, 사용자 PC 및 네트워크 환경에 따라 일부 사이트의 동작이 달라질 수 있습니다.
