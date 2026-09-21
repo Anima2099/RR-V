@@ -139,6 +139,7 @@ class SettingsPage(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self._applying_preset = False
+        self._tool_action_running = False
         self._general_preferences = load_general_preferences()
         self._preset_library = load_preset_library()
 
@@ -1908,8 +1909,16 @@ class SettingsPage(QWidget):
                 "현재 소스 실행에는 내장 도구가 포함되지 않아 비활성화됩니다. 최종 단일 EXE 패키지에서 사용할 수 있습니다."
             )
 
+    @property
+    def has_active_tool_action(self) -> bool:
+        return bool(self._tool_action_running)
+
     def _start_ytdlp_update(self) -> None:
+        if self._tool_action_running:
+            return
+        self._tool_action_running = True
         self.ytdlp_update_button.setEnabled(False)
+        self.deno_update_button.setEnabled(False)
         self.tool_action_status.emit("yt-dlp Nightly 업데이트 준비 중…")
 
         def run() -> None:
@@ -1919,6 +1928,10 @@ class SettingsPage(QWidget):
         threading.Thread(target=run, daemon=True).start()
 
     def _start_deno_update(self) -> None:
+        if self._tool_action_running:
+            return
+        self._tool_action_running = True
+        self.ytdlp_update_button.setEnabled(False)
         self.deno_update_button.setEnabled(False)
         self.tool_action_status.emit("Deno 업데이트 준비 중…")
 
@@ -1937,6 +1950,7 @@ class SettingsPage(QWidget):
         self.tool_action_label.setText(text)
 
     def _tool_action_done(self, ok: bool, message: str) -> None:
+        self._tool_action_running = False
         self.ytdlp_update_button.setEnabled(True)
         self.deno_update_button.setEnabled(True)
         self.restore_tools_button.setEnabled(has_bundled_tools())
