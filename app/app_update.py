@@ -20,7 +20,6 @@ _PRERELEASE_TAG_MARKERS = ("beta", "alpha", "preview", "pre", "rc")
 _INSTALLER_NAME_PREFIX = "rr-v_setup_"
 _INSTALLER_MAX_SIZE = 300 * 1024 * 1024
 _RELEASE_NOTES_STOP_HEADINGS = (
-    "설치",
     "installer 검증",
     "인스톨러 검증",
     "지원 환경",
@@ -86,6 +85,38 @@ def _looks_like_release_asset_section(
     return False
 
 
+def _looks_like_release_installation_section(
+    raw_lines: list[str],
+    start_index: int,
+) -> bool:
+    """'설치' 제목이 변경사항이 아니라 실제 설치 안내인지 판별한다."""
+
+    for raw_line in raw_lines[start_index:]:
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        if re.match(r"^#{1,6}\s+", stripped):
+            break
+
+        cleaned = _strip_release_note_markdown(stripped)
+        folded = cleaned.casefold()
+        if not cleaned:
+            continue
+
+        if re.search(r"rr-v[_\s-]*setup.*\.exe\b", folded):
+            return True
+        if re.fullmatch(r"sha-?256", folded):
+            return True
+
+        # '설치'를 기능 변경 카테고리로 쓸 때는 보통 bullet 목록이다.
+        # 반대로 설치 절차/안내 문장은 일반 문장이나 번호 목록으로 시작한다.
+        if re.match(r"^[-*+]\s+", stripped):
+            return False
+        return True
+
+    return False
+
+
 def release_notes_preview(
     value: object,
     *,
@@ -122,7 +153,13 @@ def release_notes_preview(
             heading_text = _strip_release_note_markdown(heading.group(1))
             folded = heading_text.casefold()
             download_heading = folded in {"다운로드", "download", "downloads"}
+            install_heading = folded in {"설치", "install", "installation"}
             if download_heading and _looks_like_release_asset_section(
+                raw_lines,
+                line_index + 1,
+            ):
+                break
+            if install_heading and _looks_like_release_installation_section(
                 raw_lines,
                 line_index + 1,
             ):
