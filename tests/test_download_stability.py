@@ -4,6 +4,7 @@ import ast
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -335,7 +336,7 @@ class DownloadStabilityTests(unittest.TestCase):
             ):
                 result = service.download(
                     task,
-                    __import__("threading").Event(),
+                    threading.Event(),
                     on_progress=lambda *_args: None,
                     on_phase=lambda *_args: None,
                     on_process=lambda _pid: None,
