@@ -27,7 +27,7 @@ class DownloadTaskList(QWidget):
     path_changed = Signal(str)
     thumbnail_recovery_requested = Signal(str)
     subtitle_recovery_requested = Signal(str)
-    problem_report_requested = Signal(str)
+    error_log_requested = Signal(str)
 
     def __init__(self, tasks: list[DownloadTask]) -> None:
         super().__init__()
@@ -88,8 +88,8 @@ class DownloadTaskList(QWidget):
         card.subtitle_recovery_requested.connect(
             self.subtitle_recovery_requested
         )
-        card.problem_report_requested.connect(
-            self.problem_report_requested
+        card.error_log_requested.connect(
+            self.error_log_requested
         )
         connect_ms = (perf_counter() - connect_started) * 1000.0
 
