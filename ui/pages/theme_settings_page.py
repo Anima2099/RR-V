@@ -305,8 +305,8 @@ class ThemeSettingsPage(SettingsPage):
 
         browser_hint = QLabel(
             "YouTube 영상 정보 확인이나 다운로드 중 추가 인증(WPC)이 필요한 경우 "
-            "Chrome·Edge·Vivaldi·Brave 같은 Chromium 브라우저 창이 잠시 열렸다가 "
-            "자동으로 닫힐 수 있으며 정상 동작입니다. WPC가 필요하지 않은 일반 "
+            "Chromium 브라우저 창이 잠시 열렸다가 자동으로 닫힐 수 있으며 정상 "
+            "동작입니다. WPC가 필요하지 않은 일반 "
             "다운로드에서는 별도 브라우저 창을 열지 않습니다."
         )
         browser_hint.setObjectName("mutedText")
