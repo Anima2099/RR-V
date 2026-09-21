@@ -200,6 +200,23 @@ class ReleaseNotesPreviewTests(unittest.TestCase):
         self.assertIn("• 기존 설치 업데이트 경로 개선", preview)
         self.assertIn("• 다운로드 안정성 개선", preview)
 
+    def test_preview_stops_before_explicit_install_guide_heading(self) -> None:
+        body = """# RR-V 1.5.0
+
+## 주요 변경사항
+- Installer 안정성 개선
+
+### 설치 방법
+1. RR-V_Setup_1.5.0.exe를 실행합니다.
+2. 설치를 완료합니다.
+"""
+
+        preview = release_notes_preview(body)
+
+        self.assertIn("• Installer 안정성 개선", preview)
+        self.assertNotIn("설치 방법", preview)
+        self.assertNotIn("설치를 완료합니다", preview)
+
     def test_preview_stops_before_download_assets_section(self) -> None:
         body = """# RR-V 1.5.0
 
