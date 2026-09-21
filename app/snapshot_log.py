@@ -11,30 +11,49 @@ _LOCK = Lock()
 _INITIALIZED = False
 
 
+def _safe_console_print(text: str) -> None:
+    try:
+        print(text, flush=True)
+    except Exception:
+        pass
+
+
 def initialize_snapshot_log() -> None:
     global _INITIALIZED
     if _INITIALIZED:
         return
-    ensure_runtime_directories()
-    SNAPSHOT_TASK_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    header = (
-        "\n" + "=" * 72
-        + f"\nRR-V snapshot session: {datetime.now():%Y-%m-%d %H:%M:%S}\n"
-        + "=" * 72 + "\n"
-    )
-    _append(SNAPSHOT_LOG_PATH, header)
+    try:
+        ensure_runtime_directories()
+        SNAPSHOT_TASK_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        header = (
+            "\n" + "=" * 72
+            + f"\nRR-V snapshot session: {datetime.now():%Y-%m-%d %H:%M:%S}\n"
+            + "=" * 72 + "\n"
+        )
+        _append(SNAPSHOT_LOG_PATH, header)
+    except Exception as error:
+        _safe_console_print(
+            f"RR-V snapshot log initialization failed: {error!r}"
+        )
+        return
     _INITIALIZED = True
 
 
 def write_snapshot_event(event: str, **fields: Any) -> None:
-    initialize_snapshot_log()
-    parts = [f"[{datetime.now():%H:%M:%S.%f}"[:-3] + "]", event]
-    for key, value in fields.items():
-        parts.append(f"{key}={value}")
-    line = " | ".join(parts)
-    print(f"[SNAPSHOT] {line}", flush=True)
-    _append(SNAPSHOT_LOG_PATH, line + "\n")
+    try:
+        initialize_snapshot_log()
+        parts = [f"[{datetime.now():%H:%M:%S.%f}"[:-3] + "]", event]
+        for key, value in fields.items():
+            parts.append(f"{key}={value}")
+        line = " | ".join(parts)
+    except Exception as error:
+        _safe_console_print(
+            f"RR-V snapshot log event failed: {error!r}"
+        )
+        return
 
+    _safe_console_print(f"[SNAPSHOT] {line}")
+    _append(SNAPSHOT_LOG_PATH, line + "\n")
 
 def create_snapshot_task_log_path() -> Path:
     initialize_snapshot_log()
@@ -57,5 +76,7 @@ def _append(path: Path, text: str) -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(text)
-    except OSError as error:
-        print(f"RR-V snapshot log write failed: {error}", flush=True)
+    except Exception as error:
+        _safe_console_print(
+            f"RR-V snapshot log write failed: {error!r}"
+        )
