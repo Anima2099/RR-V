@@ -159,6 +159,27 @@ class ReleaseNotesPreviewTests(unittest.TestCase):
         self.assertIn("result.release_notes if result.update_available else", source)
         self.assertIn("RR-V {version} 변경사항", source)
 
+    def test_download_changes_heading_is_not_treated_as_asset_section(self) -> None:
+        body = """# RR-V 1.5.0
+
+## 주요 변경사항
+
+### 다운로드
+- REMUX 기능 개선
+- 재시도 처리 안정화
+
+### 자막
+- 자막 선택 개선
+"""
+
+        preview = release_notes_preview(body)
+
+        self.assertIn("다운로드", preview)
+        self.assertIn("• REMUX 기능 개선", preview)
+        self.assertIn("• 재시도 처리 안정화", preview)
+        self.assertIn("자막", preview)
+        self.assertIn("• 자막 선택 개선", preview)
+
     def test_preview_stops_before_download_assets_section(self) -> None:
         body = """# RR-V 1.5.0
 
