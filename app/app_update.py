@@ -84,6 +84,8 @@ def release_notes_preview(
     lines: list[str] = []
     max_lines = max(1, int(max_lines))
     max_chars = max(80, int(max_chars))
+    content_line_count = 0
+    truncated_by_lines = False
 
     for raw_line in text.split("\n"):
         stripped = raw_line.strip()
@@ -112,13 +114,17 @@ def release_notes_preview(
                 cleaned = _strip_release_note_markdown(stripped)
 
         if not cleaned:
+            # 읽기용 간격은 한 줄만 유지하되 max_lines에는 포함하지 않는다.
             if lines and lines[-1] != "":
                 lines.append("")
             continue
 
-        lines.append(cleaned)
-        if len(lines) >= max_lines:
+        if content_line_count >= max_lines:
+            truncated_by_lines = True
             break
+
+        lines.append(cleaned)
+        content_line_count += 1
 
     while lines and not lines[-1]:
         lines.pop()
@@ -132,7 +138,7 @@ def release_notes_preview(
         if last_break >= max_chars // 2:
             shortened = shortened[:last_break].rstrip()
         preview = shortened + "\n…"
-    elif len(lines) >= max_lines and len(text.split("\n")) > max_lines:
+    elif truncated_by_lines:
         preview = preview.rstrip() + "\n…"
     return preview
 
