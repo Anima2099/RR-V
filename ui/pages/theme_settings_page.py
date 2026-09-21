@@ -805,7 +805,14 @@ class ThemeSettingsPage(SettingsPage):
         self.tool_action_status.emit(status_text)
 
         def run() -> None:
-            ok, message = ensure_runtime_tools(self.tool_action_status.emit)
+            try:
+                ok, message = ensure_runtime_tools(self.tool_action_status.emit)
+            except Exception as error:
+                ok = False
+                message = (
+                    "필수 도구 확인 중 예상하지 못한 오류가 발생했습니다: "
+                    f"{error!r}"
+                )
             self.tool_action_finished.emit(ok, message)
 
         threading.Thread(target=run, daemon=True).start()
