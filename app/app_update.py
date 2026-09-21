@@ -20,9 +20,6 @@ _PRERELEASE_TAG_MARKERS = ("beta", "alpha", "preview", "pre", "rc")
 _INSTALLER_NAME_PREFIX = "rr-v_setup_"
 _INSTALLER_MAX_SIZE = 300 * 1024 * 1024
 _RELEASE_NOTES_STOP_HEADINGS = (
-    "다운로드",
-    "download",
-    "downloads",
     "설치",
     "installer 검증",
     "인스톨러 검증",
@@ -65,6 +62,30 @@ def update_channel_label(value: str) -> str:
     return "베타" if normalize_update_channel(value) == UPDATE_CHANNEL_BETA else "정식"
 
 
+def _looks_like_release_asset_section(
+    raw_lines: list[str],
+    start_index: int,
+) -> bool:
+    """'다운로드' 제목이 실제 설치 파일/해시 영역인지 보수적으로 판별한다."""
+
+    for raw_line in raw_lines[start_index:]:
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        if re.match(r"^#{1,6}\s+", stripped):
+            break
+
+        cleaned = _strip_release_note_markdown(stripped)
+        folded = cleaned.casefold()
+
+        if re.search(r"rr-v[_\s-]*setup.*\.exe\b", folded):
+            return True
+        if re.fullmatch(r"sha-?256", folded):
+            return True
+
+    return False
+
+
 def release_notes_preview(
     value: object,
     *,
@@ -90,7 +111,8 @@ def release_notes_preview(
     content_line_count = 0
     truncated_by_lines = False
 
-    for raw_line in text.split("\n"):
+    raw_lines = text.split("\n")
+    for line_index, raw_line in enumerate(raw_lines):
         stripped = raw_line.strip()
         if re.fullmatch(r"[-*_]{3,}", stripped):
             continue
@@ -99,8 +121,16 @@ def release_notes_preview(
         if heading is not None:
             heading_text = _strip_release_note_markdown(heading.group(1))
             folded = heading_text.casefold()
+            download_heading = folded in {"다운로드", "download", "downloads"}
+            if download_heading and _looks_like_release_asset_section(
+                raw_lines,
+                line_index + 1,
+            ):
+                break
             if any(
-                folded == stop or folded.startswith(stop + " ") or folded.startswith(stop + ":")
+                folded == stop
+                or folded.startswith(stop + " ")
+                or folded.startswith(stop + ":")
                 for stop in _RELEASE_NOTES_STOP_HEADINGS
             ):
                 break
