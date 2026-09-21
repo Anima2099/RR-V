@@ -44,6 +44,13 @@ from app.performance_log import (
 )
 
 
+def _safe_console_print(text: str) -> None:
+    try:
+        print(text, flush=True)
+    except Exception:
+        pass
+
+
 def choose_application_font() -> QFont:
     installed_fonts = set(QFontDatabase.families())
 
@@ -78,7 +85,7 @@ def load_theme() -> str:
     try:
         theme = theme_path.read_text(encoding="utf-8")
     except OSError as error:
-        print(f"RR-V theme load failed: {error}")
+        _safe_console_print(f"RR-V theme load failed: {error}")
         return ""
 
     if active_theme_mode() == THEME_DARK:
@@ -129,14 +136,14 @@ def create_application(arguments: Sequence[str]) -> QApplication:
     try:
         initialize_settings_store()
     except OSError as error:
-        print(f"RR-V settings store migration failed: {error}")
+        _safe_console_print(f"RR-V settings store migration failed: {error}")
 
     initialize_active_theme()
 
     try:
         ensure_daily_auto_backup()
     except OSError as error:
-        print(f"RR-V settings auto backup failed: {error}")
+        _safe_console_print(f"RR-V settings auto backup failed: {error}")
 
     application_font = choose_application_font()
     app.setFont(application_font)
@@ -145,14 +152,14 @@ def create_application(arguments: Sequence[str]) -> QApplication:
     preload_task_icons()
 
     resolved_font = QFontInfo(app.font())
-    print(
+    _safe_console_print(
         f"RR-V font: {resolved_font.family()} "
         f"{resolved_font.pointSize()}pt"
     )
-    print(f"RR-V performance log: {performance_log_path()}", flush=True)
-    print(f"RR-V download log: {download_log_path()}", flush=True)
-    print(f"RR-V converter log: {converter_log_path()}", flush=True)
-    print(f"RR-V snapshot log: {snapshot_log_path()}", flush=True)
-    print(f"RR-V subtitle log: {subtitle_log_path()}", flush=True)
+    _safe_console_print(f"RR-V performance log: {performance_log_path()}")
+    _safe_console_print(f"RR-V download log: {download_log_path()}")
+    _safe_console_print(f"RR-V converter log: {converter_log_path()}")
+    _safe_console_print(f"RR-V snapshot log: {snapshot_log_path()}")
+    _safe_console_print(f"RR-V subtitle log: {subtitle_log_path()}")
 
     return app
