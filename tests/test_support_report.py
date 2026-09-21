@@ -114,7 +114,7 @@ class SupportReportTests(unittest.TestCase):
         self.assertNotIn("line 0\n", report)
         self.assertIn("line 179", report)
 
-    def test_failed_card_and_page_are_wired_for_problem_report_copy(self) -> None:
+    def test_failed_card_and_page_are_wired_for_error_log_save(self) -> None:
         root = Path(__file__).resolve().parents[1]
         card_source = (
             root / "ui" / "widgets" / "download_task_card.py"
@@ -129,17 +129,21 @@ class SupportReportTests(unittest.TestCase):
             root / "ui" / "pages" / "theme_settings_page.py"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("problem_report_requested = Signal(str)", card_source)
-        self.assertIn('QPushButton("문제 보고용 정보 복사")', card_source)
+        self.assertIn("error_log_requested = Signal(str)", card_source)
+        self.assertIn('QPushButton("에러 로그 저장하기")', card_source)
         self.assertIn(
             "self.task.status is DownloadStatus.FAILED",
             card_source,
         )
-        self.assertIn("problem_report_requested = Signal(str)", list_source)
-        self.assertIn("card.problem_report_requested.connect(", list_source)
+        self.assertIn("error_log_requested = Signal(str)", list_source)
+        self.assertIn("card.error_log_requested.connect(", list_source)
         self.assertIn("build_download_problem_report", page_source)
-        self.assertIn("def _copy_problem_report", page_source)
-        self.assertIn("QApplication.clipboard().setText(report)", page_source)
+        self.assertIn("def _save_error_log", page_source)
+        self.assertIn("QFileDialog.getSaveFileName(", page_source)
+        self.assertIn('default_name = f"RR-V_Error_{timestamp}.txt"', page_source)
+        self.assertIn('destination.write_text(report, encoding="utf-8")', page_source)
+        self.assertNotIn("QApplication.clipboard().setText(report)", page_source)
+        self.assertIn('self.toast.show_message("에러 로그를 저장했습니다.")', page_source)
         self.assertIn(
             "Chrome·Edge·Vivaldi·Brave 같은 Chromium 브라우저 창이 잠시 열렸다가",
             settings_source,
