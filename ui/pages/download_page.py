@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
@@ -429,8 +430,8 @@ class DownloadPage(QWidget):
         self.task_list.subtitle_recovery_requested.connect(
             self._recover_task_subtitle
         )
-        self.task_list.problem_report_requested.connect(
-            self._copy_problem_report
+        self.task_list.error_log_requested.connect(
+            self._save_error_log
         )
         self.scroll_area.setWidget(self.task_list)
 
@@ -440,12 +441,12 @@ class DownloadPage(QWidget):
         layout.addWidget(self.list_stack, 1)
         return page
 
-    def _copy_problem_report(self, task_id: str) -> None:
+    def _save_error_log(self, task_id: str) -> None:
         task = self._task_by_id(task_id)
         if task is None:
             return
         if task.status is not DownloadStatus.FAILED:
-            self.toast.show_message("실패한 작업에서만 문제 보고 정보를 만들 수 있습니다.")
+            self.toast.show_message("실패한 작업에서만 에러 로그를 저장할 수 있습니다.")
             return
 
         try:
@@ -456,11 +457,41 @@ class DownloadPage(QWidget):
                 task_id=task.task_id,
                 error=type(error).__name__,
             )
-            self.toast.show_message("문제 보고용 정보를 만들지 못했습니다.")
+            self.toast.show_message("에러 로그를 만들지 못했습니다.")
             return
 
-        QApplication.clipboard().setText(report)
-        self.toast.show_message("문제 보고용 정보 복사 완료")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"RR-V_Error_{timestamp}.txt"
+        selected_path, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "에러 로그 저장",
+            default_name,
+            "텍스트 파일 (*.txt)",
+        )
+        if not selected_path:
+            return
+
+        destination = Path(selected_path)
+        if destination.suffix.lower() != ".txt":
+            destination = destination.with_suffix(".txt")
+
+        try:
+            destination.write_text(report, encoding="utf-8")
+        except OSError as error:
+            write_download_event(
+                "support_report.save_failed",
+                task_id=task.task_id,
+                error=type(error).__name__,
+            )
+            show_warm_message(
+                self,
+                "에러 로그 저장 실패",
+                "선택한 위치에 에러 로그를 저장하지 못했습니다.\n"
+                "다른 위치를 선택해 다시 시도해 주세요.",
+            )
+            return
+
+        self.toast.show_message("에러 로그를 저장했습니다.")
 
     def _create_editor_page(self) -> QWidget:
         page = QWidget()
