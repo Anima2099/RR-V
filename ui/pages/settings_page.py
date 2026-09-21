@@ -1258,7 +1258,9 @@ class SettingsPage(QWidget):
         hint = QLabel(
             "yt-dlp는 Nightly 채널을 사용합니다. Deno는 YouTube JavaScript 검증을 처리합니다. "
             "YouTube 인증 런타임은 로그인 창(nodriver)과, YouTube가 요구할 때만 추가 인증(WPC)을 처리합니다. "
-            "일반 다운로드에서는 WPC가 필요하지 않으면 별도 브라우저 창을 열지 않습니다."
+            "영상 정보 확인이나 다운로드 중 WPC 인증이 필요한 경우 Chrome·Edge·Vivaldi·Brave 같은 "
+            "Chromium 브라우저 창이 잠시 열렸다가 자동으로 닫힐 수 있으며 정상 동작입니다. "
+            "WPC가 필요하지 않은 일반 다운로드에서는 별도 브라우저 창을 열지 않습니다."
         )
         hint.setObjectName("mutedText")
         hint.setWordWrap(True)
