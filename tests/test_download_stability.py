@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -228,6 +230,119 @@ class DownloadStabilityTests(unittest.TestCase):
         self.assertIn("download.orphaned_task_recovered", runtime)
         self.assertIn("QTimer.singleShot(120, self._start_next_queue_task)", finished)
 
+
+    def test_raw_task_log_open_failure_is_non_fatal(self) -> None:
+        task = _task(DownloadStatus.DOWNLOADING)
+        task.raw_log_path = "will-be-cleared.log"
+        service = YtDlpDownloadService()
+
+        with (
+            patch("services.download_service.write_download_event"),
+            patch.object(
+                Path,
+                "open",
+                side_effect=OSError("log directory unavailable"),
+            ),
+        ):
+            handle = service._open_raw_task_log(
+                Path("unavailable-task.log"),
+                task,
+                ["yt-dlp.exe", task.url],
+            )
+
+        self.assertIsNone(handle)
+        self.assertEqual(task.raw_log_path, "")
+
+    def test_raw_task_log_stream_write_failure_is_non_fatal(self) -> None:
+        task = _task(DownloadStatus.DOWNLOADING)
+        task.raw_log_path = "partial-task.log"
+        service = YtDlpDownloadService()
+
+        class FailingHandle:
+            def __init__(self) -> None:
+                self.closed = False
+
+            def write(self, _text: str) -> None:
+                raise OSError("disk full")
+
+            def flush(self) -> None:
+                pass
+
+            def close(self) -> None:
+                self.closed = True
+
+        handle = FailingHandle()
+        with patch("services.download_service.write_download_event"):
+            result = service._write_raw_task_log(
+                handle,  # type: ignore[arg-type]
+                "진행 로그 😀 日本語\n",
+                Path("partial-task.log"),
+                task,
+            )
+
+        self.assertIsNone(result)
+        self.assertTrue(handle.closed)
+        self.assertEqual(task.raw_log_path, "")
+
+    def test_download_continues_when_raw_task_log_is_unavailable(self) -> None:
+        class FakeProcess:
+            pid = 4321
+            stdout = [
+                "RRV_PROGRESS|downloading|1|10|0|1.0MiB/s|00:01\n",
+                "RRV_OUTPUT|C:/fake/result.mp4\n",
+            ]
+
+            def wait(self) -> int:
+                return 0
+
+            def poll(self) -> int:
+                return 0
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            task = _task(DownloadStatus.QUEUED)
+            task.save_path = temp_dir
+            task.title = "제목 😀 日本語"
+            task.output_stem = "result"
+
+            service = YtDlpDownloadService()
+            service.executable = Path("yt-dlp.exe")
+            output = Path(temp_dir) / "result.mp4"
+
+            with (
+                patch(
+                    "services.download_service.load_general_preferences",
+                    return_value=SimpleNamespace(file_collision_mode="rename"),
+                ),
+                patch.object(
+                    service,
+                    "_build_command",
+                    return_value=["yt-dlp.exe", task.url],
+                ),
+                patch.object(
+                    service,
+                    "_open_raw_task_log",
+                    return_value=None,
+                ),
+                patch.object(
+                    service,
+                    "_resolve_output_file",
+                    return_value=output,
+                ),
+                patch(
+                    "services.download_service.subprocess.Popen",
+                    return_value=FakeProcess(),
+                ),
+            ):
+                result = service.download(
+                    task,
+                    __import__("threading").Event(),
+                    on_progress=lambda *_args: None,
+                    on_phase=lambda *_args: None,
+                    on_process=lambda _pid: None,
+                )
+
+        self.assertEqual(result.output_file, str(output))
+        self.assertEqual(result.raw_log_path, "")
 
     def test_download_logger_catches_broad_environment_failures(self) -> None:
         path = ROOT / "app" / "download_log.py"
