@@ -43,6 +43,58 @@ class ReleaseNotesPreviewTests(unittest.TestCase):
         self.assertNotIn("https://", preview)
         self.assertNotIn("이 문장은 앱 미리보기에 나오면 안 됩니다.", preview)
 
+    def test_blank_lines_do_not_consume_preview_line_budget(self) -> None:
+        body = """# RR-V 1.5.0
+
+안정판 전환을 위한 업데이트입니다.
+
+## 주요 변경사항
+
+### 다운로드
+
+- 첫 번째 안정성 개선
+
+- 두 번째 안정성 개선
+
+- 세 번째 안정성 개선
+
+- 네 번째 안정성 개선
+
+- 다섯 번째 안정성 개선
+"""
+
+        preview = release_notes_preview(body, max_lines=7, max_chars=650)
+
+        self.assertIn("• 첫 번째 안정성 개선", preview)
+        self.assertIn("• 두 번째 안정성 개선", preview)
+        self.assertIn("• 세 번째 안정성 개선", preview)
+        self.assertIn("• 네 번째 안정성 개선", preview)
+        self.assertNotIn("• 다섯 번째 안정성 개선", preview)
+        self.assertTrue(preview.endswith("…"))
+
+    def test_blank_spacing_is_collapsed_but_preserved(self) -> None:
+        body = """# RR-V 1.5.0
+
+
+
+## 주요 변경사항
+
+
+
+- 항목 A
+
+
+
+- 항목 B
+"""
+
+        preview = release_notes_preview(body, max_lines=3, max_chars=650)
+
+        self.assertNotIn("\n\n\n", preview)
+        self.assertIn("주요 변경사항\n\n• 항목 A", preview)
+        self.assertIn("• 항목 B", preview)
+        self.assertFalse(preview.endswith("…"))
+
     def test_preview_is_bounded_for_legacy_long_release_body(self) -> None:
         body = "# RR-V 9.9.9\n\n" + "\n".join(
             f"- 변경사항 {index} " + ("내용 " * 20)
