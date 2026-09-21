@@ -343,7 +343,7 @@ class YtDlpDownloadService:
                 task_id=task.task_id,
                 return_code=return_code,
                 elapsed_ms=f"{elapsed_ms:.1f}",
-                raw_log=task_log_path,
+                raw_log=task.raw_log_path or "unavailable",
             )
             raise DownloadExecutionError(
                 self._friendly_error(detail, task.url),
