@@ -178,6 +178,13 @@ class DownloadStabilityTests(unittest.TestCase):
         self.assertTrue(service.has_running_process)
 
         service._process = None
+        service._last_process = FakeProcess(result=None)  # type: ignore[assignment]
+        self.assertTrue(service.has_running_process)
+
+        service._last_process = FakeProcess(result=0)  # type: ignore[assignment]
+        self.assertFalse(service.has_running_process)
+
+        service._last_process = None
         self.assertFalse(service.has_running_process)
 
     def test_controller_reports_runtime_state_before_queue_continues(self) -> None:
