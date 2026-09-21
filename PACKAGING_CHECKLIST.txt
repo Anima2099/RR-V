@@ -1,14 +1,32 @@
-RR-V 1.4.1 community beta hotfix release checklist
+RR-V 1.5.0 Stable release checklist
+
+Release target
+Target version: 1.5.0
+Release channel: stable
+Previous public release: 1.4.1 Community Beta
+GitHub Release prerelease flag: OFF
+Installer name: RR-V_Setup_1.5.0.exe
 
 Release rule
 [ ] Keep the development source folder separate from build/dist output.
 [ ] Keep the tested Git commit/branch as the release source reference.
+[ ] Review every changed file in GitHub Desktop before the release commit.
 [ ] Remove temporary patch/test files from the release source folder.
+[ ] Do not merge or force-update main until the final branch has passed tests and smoke checks.
+
+Final release switch
+Do these together immediately before the release build:
+[ ] app\constants.py shows APP_VERSION = "1.5.0"
+[ ] app\constants.py shows APP_DISPLAY_VERSION = "1.5.0"
+[ ] app\constants.py shows APP_RELEASE_CHANNEL = "stable"
+[ ] RR-V.version_info.txt shows filevers/prodvers 1,5,0,0 and FileVersion/ProductVersion 1.5.0
+[ ] installer\RR-V.iss shows MyAppVersion "1.5.0"
+[ ] Program Information and settings information cards show Version 1.5.0 · Stable
+[ ] Tool diagnostics identify RR-V 1.5.0 Stable
+[ ] README.md identifies 1.5.0 Stable and contains no current-release Community Beta wording
+[ ] python -m unittest discover -s tests -v passes completely after the version switch
 
 Before build
-[ ] app\constants.py shows APP_VERSION = "1.4.1", APP_DISPLAY_VERSION = "1.4.1" and APP_RELEASE_CHANNEL = "beta"
-[ ] RR-V.version_info.txt shows FileVersion/ProductVersion 1.4.1
-[ ] installer\RR-V.iss shows MyAppVersion "1.4.1"
 [ ] resources\icons\RR-V.ico and RR-V.png are the intended release icons
 [ ] LICENSE contains RR-V Source Available License 1.0
 [ ] LICENSE.ko-KR.txt is present and identifies the English LICENSE as authoritative
@@ -17,12 +35,11 @@ Before build
 [ ] THIRD_PARTY_NOTICES.txt and SOURCE_OFFER.txt are present
 [ ] resources\wpc-provider\runtime contains WPC and nodriver
 [ ] resources\wpc-provider\WPC_RUNTIME_LOCK.txt is present and keeps the regression-tested dependency set
-[ ] .venv contains the pinned PySide6 6.11.1 packages from requirements.txt
+[ ] .venv contains the pinned PySide6 packages from requirements.txt
 [ ] PyInstaller is installed in the release virtual environment
 [ ] RR-V and RR-V-Auth-Helper are completely stopped, including the system tray
-[ ] python -m unittest discover -s tests -v passes completely
 
-External runtime tool policy (1.2.0+)
+External runtime tool policy
 [ ] yt-dlp.exe is NOT required in resources\tools for packaging
 [ ] ffmpeg.exe is NOT required in resources\tools for packaging
 [ ] ffprobe.exe is NOT required in resources\tools for packaging
@@ -72,7 +89,7 @@ Build Installer
   powershell -ExecutionPolicy Bypass -File .\BUILD_INSTALLER.ps1
 
 Expected output
-  installer-output\RR-V_Setup_1.4.1.exe
+  installer-output\RR-V_Setup_1.5.0.exe
 
 BUILD_INSTALLER.ps1 verifies APP_VERSION and Inno Setup MyAppVersion match, creates
 RRV_INSTALL_MANIFEST.txt from the exact dist\RR-V payload, checks required files and
@@ -88,9 +105,9 @@ License package verification
 [ ] LICENSE.ko-KR.txt opens, is readable in Korean, and states that LICENSE.txt controls if interpretations differ
 [ ] THIRD_PARTY_NOTICES.txt opens and lists bundled vs runtime-downloaded components
 [ ] SOURCE_OFFER.txt opens and contains the source request contact
-[ ] licenses\BUILD_LICENSE_MANIFEST.txt identifies RR-V 1.4.1 and records the exact Python/PySide6/PyInstaller build versions
+[ ] licenses\BUILD_LICENSE_MANIFEST.txt identifies RR-V 1.5.0 and records the exact Python/PySide6/PyInstaller build versions
 [ ] licenses\Python-LICENSE.txt is present
-[ ] licenses\PySide6-Qt contains METADATA and available license files from all four pinned distributions
+[ ] licenses\PySide6-Qt contains METADATA and available license files from all pinned distributions
 [ ] licenses\WPC-runtime contains the exact locked wheel METADATA and available LICENSE/COPYING/NOTICE files
 [ ] licenses\RR-V-Auth-Helper-source contains main.py, README.md, LICENSE_NOTICE.txt, and RR-V-Auth-Helper.spec
 [ ] The bundled WPC runtime still contains the nodriver and modified yt-dlp-getpot-wpc Python sources
@@ -98,26 +115,28 @@ License package verification
 [ ] Program Information > Third-party license notice opens THIRD_PARTY_NOTICES.txt
 [ ] Program Information > Source availability opens SOURCE_OFFER.txt
 
-Fresh-install installer regression (1.4.1 hotfix)
+Fresh-install installer regression (1.5.0 Stable)
 [ ] Remove the existing RR-V installation so Windows Installed Apps no longer contains RR-V
 [ ] Confirm the RR-V HKCU uninstall registration is absent before starting the installer
 [ ] User data under %APPDATA%\RR-V and %LOCALAPPDATA%\RR-V may be preserved for this test
-[ ] Run RR-V_Setup_1.4.1.exe normally without administrator elevation
-[ ] Installer starts without "An attempt was made to expand the app constant before it was initialized" runtime error
+[ ] Run RR-V_Setup_1.5.0.exe normally without administrator elevation
 [ ] RR-V update options page is skipped when no previous installation registration exists
 [ ] Select-directory and remaining normal installer pages open correctly
-[ ] Installation completes and RR-V launches as Version 1.4.1
+[ ] Installation completes and RR-V launches as Version 1.5.0 · Stable
 [ ] Preserved settings/authentication/tools are recognized if user data was intentionally kept
+[ ] Settings > 프로그램 관리 > 도구 및 리소스 reports missing external tools on a truly fresh data state
+[ ] Required tools can be installed from the official sources
+[ ] One lightweight YouTube information lookup and download succeeds
 [ ] Exit RR-V completely, including the system tray
-[ ] Run RR-V_Setup_1.4.1.exe a second time over the installed 1.4.1 copy
-[ ] Existing installation is detected and the RR-V update options page now appears
+[ ] Run RR-V_Setup_1.5.0.exe a second time over the installed 1.5.0 copy
+[ ] Existing installation is detected and the RR-V update options page appears
 [ ] Reset checkbox is OFF by default
 
-Clean upgrade regression: 1.4.0 -> 1.4.1
-[ ] Start from the real installed RR-V 1.4.0, not the development python process
+Clean upgrade regression: 1.4.1 -> 1.5.0
+[ ] Start from the real installed RR-V 1.4.1 Community Beta, not the development Python process
 [ ] Back up %APPDATA%\RR-V and %LOCALAPPDATA%\RR-V before destructive reset testing
 [ ] Put a harmless sentinel file such as RRV_OLD_SENTINEL.tmp inside the installed program directory
-[ ] Run RR-V_Setup_1.4.1.exe over 1.4.0
+[ ] Run RR-V_Setup_1.5.0.exe over 1.4.1
 [ ] Existing install shows the RR-V update options page
 [ ] Reset checkbox is OFF by default
 [ ] First upgrade is performed with reset OFF
@@ -125,11 +144,12 @@ Clean upgrade regression: 1.4.0 -> 1.4.1
 [ ] New RRV_INSTALL_MANIFEST.txt exists in the installed application directory
 [ ] %APPDATA%\RR-V settings, presets, cookies, queue and backups survive the normal upgrade
 [ ] %LOCALAPPDATA%\RR-V downloaded tools and WPC runtime survive the normal upgrade
-[ ] Windows Installed apps shows RR-V 1.4.1
-[ ] RR-V.exe file properties show File/Product version 1.4.1
-[ ] RR-V launches and displays Version 1.4.1
+[ ] Windows Installed Apps shows RR-V 1.5.0
+[ ] RR-V.exe file properties show File/Product version 1.5.0
+[ ] RR-V launches and displays Version 1.5.0 · Stable
 [ ] Existing preset/settings are still selected after launch
 [ ] Existing authentication is still recognized where valid
+[ ] Existing sidebar collapsed/expanded state is preserved
 [ ] Settings > 프로그램 관리 > 도구 및 리소스 recognizes the existing yt-dlp / FFmpeg / FFprobe / Deno and WPC runtime
 [ ] One lightweight YouTube information lookup and download succeeds
 [ ] Browser Connector still works or can be re-registered normally
@@ -139,7 +159,7 @@ Destructive reset upgrade regression
 [ ] Close RR-V completely including the tray before testing
 [ ] Confirm the backup of %APPDATA%\RR-V and %LOCALAPPDATA%\RR-V exists
 [ ] Put a harmless user media sentinel in an external save directory
-[ ] Run RR-V_Setup_1.4.1.exe again and CHECK "설정, 로그인, 프리셋 및 다운로드 도구도 초기화"
+[ ] Run RR-V_Setup_1.5.0.exe again and CHECK "설정, 로그인, 프리셋 및 다운로드 도구도 초기화"
 [ ] Old RR-V settings/cookies/presets/tools/runtime are removed
 [ ] RR-V startup and Native Messaging registrations from the old data state are removed
 [ ] Post-install RR-V launch recreates only normal fresh-start data
@@ -147,66 +167,99 @@ Destructive reset upgrade regression
 [ ] External user media sentinel remains untouched
 [ ] After reinstalling required tools, one lightweight download succeeds
 
-Fresh-install runtime tool regression
-[ ] Start with %LOCALAPPDATA%\RR-V\tools containing no yt-dlp / ffmpeg / ffprobe / deno
-[ ] Settings > 프로그램 관리 > 도구 및 리소스 shows the missing tools clearly
-[ ] The primary action changes to "필수 구성요소 설치"
-[ ] yt-dlp Nightly downloads from the official release source and passes execution verification
-[ ] FFmpeg / FFprobe Release Essentials downloads, passes SHA-256/version verification, and installs as a pair
-[ ] Deno downloads from the official release source and passes execution verification
-[ ] After installation all four executables exist under %LOCALAPPDATA%\RR-V\tools
-[ ] The UI shows their current versions and normal status
-[ ] A real video information lookup/download succeeds after first-time tool installation
+Settings backup / restore regression
+[ ] Create a manual settings backup
+[ ] Change a harmless setting such as sidebar collapsed state
+[ ] Restore the backup and restart RR-V
+[ ] The backed-up setting is restored
+[ ] A malformed backup is rejected without clearing current settings
+[ ] A failed restore does not leave settings partially replaced
+
+Runtime tool update regression
+[ ] Settings > 프로그램 관리 > 도구 및 리소스 shows current yt-dlp / FFmpeg / FFprobe / Deno / WPC status
+[ ] "최신 상태로 맞추기" completes normally
+[ ] Attempting a real app exit while a tool install/update/repair is active is blocked with a clear message
+[ ] After the tool action finishes, RR-V can exit normally
+[ ] Tool update failure does not leave RR-V permanently locked from exiting
 
 YouTube / site authentication regression
-[ ] Settings > 사이트 연동 > 인증 관리 offers Google Chrome and Microsoft Edge only
+[ ] Settings > 사이트 연동 > 인증 관리 offers installed Chrome / Edge / Vivaldi / Brave browsers where available
 [ ] RR-V.exe finds RR-V-Auth-Helper.exe beside it in the onedir root
-[ ] A fresh Chrome YouTube login saves authentication successfully
-[ ] A fresh Edge YouTube login saves authentication successfully
+[ ] A fresh YouTube login saves authentication successfully
 [ ] Korean authentication status text is not corrupted across the Helper IPC boundary
 [ ] Existing RR-V authentication is reused after restart
 [ ] YouTube information lookup and a 4K download succeed with saved authentication
-[ ] Instagram RR-V-managed login succeeds in Chrome/Edge and survives restart
+[ ] Instagram RR-V-managed login succeeds and survives restart
 [ ] Instagram authentication is applied automatically to information lookup and downloads
-[ ] TikTok RR-V-managed login succeeds and survives restart
+[ ] TikTok RR-V-managed login succeeds and survives restart where the site/network permits access
 [ ] TikTok authentication is applied automatically when yt-dlp processes TikTok URLs
 [ ] Normal downloads do not open a WPC browser window when PO Token minting is not required
+[ ] When WPC is required, a temporary Chromium browser window may open and close normally
+[ ] Settings > 프로그램 관리 > 도구 및 리소스 explains that temporary WPC browser behavior
 [ ] Manual cookie-folder fallback still works where valid
 
+Release Notes / update regression
+[ ] Stable update channel is the default for a fresh 1.5.0 settings state
+[ ] Stable channel ignores prerelease-only GitHub releases
+[ ] Beta channel can still see applicable stable and prerelease releases
+[ ] An available update shows the complete change list in the scrollable Release Notes dialog
+[ ] A release-note heading named "다운로드" is kept when it contains change bullets
+[ ] A release asset/download section is excluded from the in-app preview
+[ ] A heading named "설치" is kept when it contains change bullets
+[ ] Explicit install-guide sections such as "설치 방법" are excluded from the in-app preview
+
 UI regression
-[ ] Version display shows 1.4.1
+[ ] Version display shows 1.5.0 · Stable
 [ ] Light and dark Warm Sage themes both render normally
 [ ] Settings top-level navigation shows exactly 기본 설정 / 사이트 연동 / 프로그램 관리
 [ ] 기본 설정 opens 일반 설정 first and exposes 일반 설정 / 다운로드 설정 / 다운로드 프리셋
 [ ] 사이트 연동 opens 인증 관리 first and exposes 인증 관리 / 확장 프로그램
 [ ] 프로그램 관리 opens 도구 및 리소스 first and exposes 도구 및 리소스 / 백업 및 복구
-[ ] Entering 프로그램 관리 still refreshes tool status and performs the automatic component update check once per session
+[ ] Entering 프로그램 관리 refreshes tool status and performs the automatic component update check once per session
 [ ] Moving repeatedly between top-level and internal settings tabs does not reset unsaved controls, duplicate content, or crash
-[ ] Sidebar Program Information sits directly above Version 1.4.1 in the lower app-info area
+[ ] Sidebar expanded width and collapsed thin-button state render normally
+[ ] Sidebar collapsed/expanded state survives restart
+[ ] Resetting UI layout/collapse state restores the sidebar state appropriately
 [ ] Program Information shows RR-V version, update check, Release Notes preview, developer/contact, GitHub, support, and license/source links
-[ ] Settings > 프로그램 관리 > 도구 및 리소스 shows yt-dlp / FFmpeg / Deno / YouTube authentication runtime status
-[ ] Settings > 프로그램 관리 > 도구 및 리소스 can install missing external runtime tools
-[ ] Settings > 프로그램 관리 > 도구 및 리소스 can bring installed tools to the supported latest state
 [ ] Explorer / title bar / taskbar / Alt+Tab show the RR-V icon
+
+Download stability regression
+[ ] Normal YouTube video information lookup succeeds
+[ ] Normal YouTube video download succeeds
+[ ] Sequential queue downloads remain sequential
+[ ] Stop and retry work normally
+[ ] Failed-task filter, bulk failed removal, and retry-all work
+[ ] Old/restored subtitle selections containing live_chat/comments/danmaku never reach the final yt-dlp subtitle command
+[ ] Normal language subtitle codes remain available
+[ ] A Worker-ended / yt-dlp-still-running edge case does not allow another download to start in parallel
+[ ] A task is not declared orphaned while an actual worker or yt-dlp process is still alive
+[ ] Raw task-log creation/write failures do not cancel an otherwise valid download
+[ ] Console/log encoding failures do not terminate media operations
+
+Failed-task error log regression
+[ ] A failed task shows "에러 로그 저장하기"
+[ ] Clicking it opens the Windows save dialog immediately
+[ ] The suggested filename uses RR-V_Error_<timestamp>.txt
+[ ] The user can choose a different save location and filename
+[ ] The saved TXT contains RR-V/OS/tool versions, task error information, and the bounded raw-log tail
+[ ] Authorization/Cookie/token-like values are redacted
+[ ] Local home/save/log paths are redacted
+[ ] Successful save shows "에러 로그를 저장했습니다."
+[ ] Cancelling the save dialog creates no file and causes no error
 
 Core regression
 [ ] Custom download presets create/edit/duplicate/delete/default selection work
 [ ] Queue bulk save-path change affects only tasks that have not started
-[ ] Failed-task filter, bulk failed removal, and retry-all work without changing stopped/completed tasks
 [ ] TXT export/import round-trip preserves URL order
 [ ] Thumbnail-only recovery and subtitle-only recovery work without video redownload
 [ ] System tray exit fully terminates RR-V and does not leave an Auth Helper process behind
-[ ] Browser Connector works in Chrome and Edge while RR-V is running/tray-resident
+[ ] Browser Connector works while RR-V is running/tray-resident
 [ ] Browser Connector Native Messaging fallback starts RR-V correctly from a fully stopped state
-[ ] Video information lookup works
-[ ] Quick add and playlist/batch add work
-[ ] Settings > 기본 설정 > 다운로드 설정 exposes "빠른 추가 후 자동으로 다운로드 시작" and it defaults OFF for a fresh preference state
-[ ] With Quick Add auto-download OFF, manual Quick Add stops at the normal queued state
-[ ] With Quick Add auto-download ON and RR-V idle, the sequential download queue starts automatically after information lookup
-[ ] If a download is already active, Quick Add auto-download never starts a parallel download or jumps ahead of the existing queue
-[ ] Quick Add auto-download preference survives restart
-[ ] Browser link handling can be switched between queue-only and queue + automatic download
-[ ] Browser automatic-download preference survives restart
+[ ] Quick Add and playlist/batch add work
+[ ] Quick Add auto-download OFF stops at the normal queued state
+[ ] Quick Add auto-download ON starts the existing sequential queue after information lookup
+[ ] If a download is already active, Quick Add auto-download never starts a parallel download or jumps ahead
+[ ] Quick Add and Browser Connector automatic-download preferences survive restart
 [ ] Filename template/token output works
 [ ] Remux completes stream-copy output normally
 [ ] Chapter split creates expected files and optional original deletion behaves safely
@@ -234,4 +287,14 @@ License / distribution boundary
 [ ] PySide6 / Qt LGPL notices and exact package metadata are preserved
 [ ] SOURCE_OFFER.txt remains valid and the contact address is current
 [ ] Official download sources for yt-dlp Nightly, FFmpeg Release Essentials, and Deno match app\tool_sources.py
-[ ] Archive the exact RR-V 1.4.1 source commit, specs, build script, WPC lock, browser extension, final onedir build, and Installer
+[ ] Archive the exact RR-V 1.5.0 source commit, specs, build script, WPC lock, browser extension, final onedir build, and Installer
+
+GitHub release
+[ ] Merge the tested 1.5.0 Stable source to main only after final tests/smoke checks pass
+[ ] Tag the exact release commit as v1.5.0
+[ ] GitHub Release title identifies RR-V 1.5.0
+[ ] Prerelease is OFF
+[ ] Upload RR-V_Setup_1.5.0.exe
+[ ] Publish the Installer SHA-256
+[ ] Release Notes list the actual 1.5.0 changes and do not include stale Community Beta/hotfix wording
+[ ] GitHub repository README on main shows 1.5.0 Stable after merge
