@@ -65,8 +65,8 @@ def update_channel_label(value: str) -> str:
 def release_notes_preview(
     value: object,
     *,
-    max_lines: int = 20,
-    max_chars: int = 1800,
+    max_lines: int = 120,
+    max_chars: int = 12000,
 ) -> str:
     """GitHub Release 본문에서 앱 안에 보여줄 짧은 변경사항만 만든다.
 
