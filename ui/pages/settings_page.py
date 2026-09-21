@@ -1922,7 +1922,11 @@ class SettingsPage(QWidget):
         self.tool_action_status.emit("yt-dlp Nightly 업데이트 준비 중…")
 
         def run() -> None:
-            ok, message = update_ytdlp(self.tool_action_status.emit)
+            try:
+                ok, message = update_ytdlp(self.tool_action_status.emit)
+            except Exception as error:
+                ok = False
+                message = f"yt-dlp 업데이트 중 예상하지 못한 오류가 발생했습니다: {error!r}"
             self.tool_action_finished.emit(ok, message)
 
         threading.Thread(target=run, daemon=True).start()
@@ -1936,7 +1940,11 @@ class SettingsPage(QWidget):
         self.tool_action_status.emit("Deno 업데이트 준비 중…")
 
         def run() -> None:
-            ok, message = update_deno(self.tool_action_status.emit)
+            try:
+                ok, message = update_deno(self.tool_action_status.emit)
+            except Exception as error:
+                ok = False
+                message = f"Deno 업데이트 중 예상하지 못한 오류가 발생했습니다: {error!r}"
             self.tool_action_finished.emit(ok, message)
 
         threading.Thread(target=run, daemon=True).start()
