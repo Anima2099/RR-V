@@ -87,6 +87,7 @@ class SupportReportTests(unittest.TestCase):
         self.assertNotIn(str(Path.home()), report)
         self.assertIn("<redacted>", report)
         self.assertIn("<save-path>", report)
+        self.assertIn("=== RR-V 에러 로그 ===", report)
         self.assertIn("RR-V:", report)
         self.assertIn("yt-dlp Nightly: OK", report)
         self.assertIn("normal diagnostic line", report)
@@ -141,6 +142,11 @@ class SupportReportTests(unittest.TestCase):
         self.assertIn("def _save_error_log", page_source)
         self.assertIn("QFileDialog.getSaveFileName(", page_source)
         self.assertIn('default_name = f"RR-V_Error_{timestamp}.txt"', page_source)
+        self.assertLess(
+            page_source.index("QFileDialog.getSaveFileName("),
+            page_source.index("report = build_download_problem_report(task)"),
+        )
+        self.assertIn('self.toast.show_message("에러 로그를 준비하는 중…")', page_source)
         self.assertIn('destination.write_text(report, encoding="utf-8")', page_source)
         self.assertNotIn("QApplication.clipboard().setText(report)", page_source)
         self.assertIn('self.toast.show_message("에러 로그를 저장했습니다.")', page_source)
