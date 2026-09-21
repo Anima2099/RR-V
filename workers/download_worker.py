@@ -42,7 +42,7 @@ class DownloadWorker(QThread):
         except DownloadCancelledError as error:
             self.download_cancelled.emit(str(error))
         except DownloadExecutionError as error:
-            write_download_event(
+            self._write_event_safely(
                 "download.worker_failed",
                 task_id=self.task.task_id,
                 message=error.user_message,
@@ -50,7 +50,7 @@ class DownloadWorker(QThread):
             )
             self.download_failed.emit(error.user_message, error.technical_detail)
         except Exception as error:  # 마지막 안전망
-            write_download_event(
+            self._write_event_safely(
                 "download.worker_unexpected_error",
                 task_id=self.task.task_id,
                 error=repr(error),
@@ -64,6 +64,14 @@ class DownloadWorker(QThread):
                 result.output_file,
                 result.raw_log_path,
             )
+
+    @staticmethod
+    def _write_event_safely(event: str, **fields: object) -> None:
+        try:
+            write_download_event(event, **fields)
+        except Exception:
+            # 로깅 계층 자체가 고장 나도 실패/취소 신호 전달은 계속한다.
+            pass
 
     def _emit_progress(
         self,
@@ -85,7 +93,7 @@ class DownloadWorker(QThread):
         bucket = min(4, max(0, percent) // 25)
         if bucket > self._last_progress_bucket:
             self._last_progress_bucket = bucket
-            write_download_event(
+            self._write_event_safely(
                 "download.progress",
                 task_id=self.task.task_id,
                 percent=percent,
@@ -102,7 +110,7 @@ class DownloadWorker(QThread):
         if phase_key == self._last_phase:
             return
         self._last_phase = phase_key
-        write_download_event(
+        self._write_event_safely(
             "download.phase",
             task_id=self.task.task_id,
             phase=phase,
