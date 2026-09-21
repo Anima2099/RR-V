@@ -26,6 +26,14 @@ class DownloadWorker(QThread):
         self._last_progress_bucket = -1
         self._last_phase = ""
 
+    @property
+    def has_running_process(self) -> bool:
+        try:
+            return self._service.has_running_process
+        except Exception:
+            # 확인 실패 시 살아 있다고 간주해 고립 작업 오탐을 막는다.
+            return True
+
     def cancel(self) -> None:
         self._cancel_event.set()
         self._service.cancel()
