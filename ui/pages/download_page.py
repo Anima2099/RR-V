@@ -31,6 +31,7 @@ from app.general_preferences import (
     resolved_download_directory,
 )
 from app.queue_store import QueueLoadResult, load_queue, save_queue
+from app.support_report import build_download_problem_report
 from app.notifications import play_completion_sound
 from app.paths import (
     COLLAPSE_ICON_PATH,
@@ -428,6 +429,9 @@ class DownloadPage(QWidget):
         self.task_list.subtitle_recovery_requested.connect(
             self._recover_task_subtitle
         )
+        self.task_list.problem_report_requested.connect(
+            self._copy_problem_report
+        )
         self.scroll_area.setWidget(self.task_list)
 
         self.empty_list_card = empty_card
@@ -435,6 +439,18 @@ class DownloadPage(QWidget):
         self.list_stack.addWidget(self.scroll_area)
         layout.addWidget(self.list_stack, 1)
         return page
+
+    def _copy_problem_report(self, task_id: str) -> None:
+        task = self._task_by_id(task_id)
+        if task is None:
+            return
+        if task.status is not DownloadStatus.FAILED:
+            self.toast.show_message("실패한 작업에서만 문제 보고 정보를 만들 수 있습니다.")
+            return
+
+        report = build_download_problem_report(task)
+        QApplication.clipboard().setText(report)
+        self.toast.show_message("문제 보고용 정보 복사 완료")
 
     def _create_editor_page(self) -> QWidget:
         page = QWidget()
