@@ -22,6 +22,7 @@ class DownloadStabilityTests(unittest.TestCase):
         )
 
         with (
+            patch("app.download_log.initialize_download_log"),
             patch("builtins.print", side_effect=encoding_error),
             patch("app.download_log._append") as append,
         ):
@@ -36,14 +37,17 @@ class DownloadStabilityTests(unittest.TestCase):
 
     def test_download_event_survives_file_log_failure(self) -> None:
         with (
+            patch("app.download_log.initialize_download_log"),
             patch("app.download_log._safe_console_print"),
-            patch("app.download_log._append", side_effect=OSError("disk unavailable")),
+            patch.object(download_log.Path, "open", side_effect=OSError("disk unavailable")) as open_file,
         ):
             download_log.write_download_event(
                 "download.command_ready",
                 task_id="file-log-test",
                 title="파일 로그 실패도 다운로드를 막으면 안 됨",
             )
+
+        open_file.assert_called_once()
 
     def test_worker_failure_signal_is_after_fail_safe_logging(self) -> None:
         path = ROOT / "workers" / "download_worker.py"
