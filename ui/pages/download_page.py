@@ -49,7 +49,11 @@ from app.url_list_io import (
 )
 from controllers.download_controller import DownloadController
 from core.batch_entry import BatchEntry
-from core.download_task import DownloadStatus, DownloadTask
+from core.download_task import (
+    DownloadStatus,
+    DownloadTask,
+    is_orphaned_download_task,
+)
 from core.media_info import MediaInfo
 from ui.dialogs.batch_add_dialog import BatchAddDialog
 from ui.dialogs.duplicate_url_dialog import (
@@ -149,6 +153,9 @@ class DownloadPage(QWidget):
         self.controller.download_succeeded.connect(self._download_succeeded)
         self.controller.download_failed.connect(self._download_failed)
         self.controller.download_cancelled.connect(self._download_cancelled)
+        self.controller.download_runtime_ended.connect(
+            self._download_runtime_ended
+        )
         self.controller.download_finished.connect(self._download_finished)
 
         main_layout = QVBoxLayout(self)
@@ -1686,6 +1693,60 @@ class DownloadPage(QWidget):
         self.task_list.refresh_task_status(task_id)
         self._schedule_queue_save()
         self.toast.show_message(message)
+
+    def _download_runtime_ended(
+        self,
+        task_id: str,
+        process_running: bool,
+    ) -> None:
+        task = self._task_by_id(task_id)
+        if task is None:
+            return
+
+        if process_running:
+            if task.status in {
+                DownloadStatus.DOWNLOADING,
+                DownloadStatus.POSTPROCESSING,
+            }:
+                # Worker 종료 후에도 실제 프로세스가 남아 있으면 고립 판정 조건은
+                # 충족하지 않는다. 다만 새 작업이 겹치지 않도록 대기열은 멈춘다.
+                self._queue_running = False
+                self._queue_waiting_for_analysis = False
+                write_download_event(
+                    "download.runtime_process_still_alive",
+                    task_id=task_id,
+                    status=task.status.value,
+                    pid=task.process_id,
+                )
+                self.toast.show_message(
+                    "다운로드 프로세스 종료 상태를 확인하지 못해 대기열을 일시 중지했습니다."
+                )
+                self._refresh_list_state()
+            return
+
+        if not is_orphaned_download_task(
+            task,
+            worker_running=False,
+            process_running=False,
+        ):
+            return
+
+        previous_status = task.status
+        write_download_event(
+            "download.orphaned_task_recovered",
+            task_id=task_id,
+            previous_status=previous_status.value,
+            progress=task.progress,
+            raw_log=task.raw_log_path or "-",
+        )
+        self._download_failed(
+            task_id,
+            "다운로드 작업이 예상치 못하게 종료되었습니다. 다시 시도해 주세요.",
+            (
+                "DownloadWorker와 yt-dlp 프로세스가 모두 종료됐지만 "
+                f"작업 상태가 {previous_status.value!r}에 남아 있었습니다."
+            ),
+        )
 
     def _download_finished(self, _task_id: str) -> None:
         self._refresh_list_state()
