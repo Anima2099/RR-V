@@ -50,6 +50,12 @@ class MediaAnalysisError(RuntimeError):
 
 
 class YtDlpService:
+    _NON_CAPTION_SUBTITLE_KEYS = {
+        "live_chat",
+        "comments",
+        "danmaku",
+    }
+
     def __init__(self) -> None:
         self.executable = find_executable("yt-dlp.exe")
         self._process: subprocess.Popen[str] | None = None
@@ -325,6 +331,17 @@ class YtDlpService:
     def _extract_subtitle_languages(
         info: dict[str, Any],
     ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        def is_regular_caption_key(value: object) -> bool:
+            language = str(value or "").strip()
+            if not language:
+                return False
+            normalized = re.sub(
+                r"[\s-]+",
+                "_",
+                language.casefold(),
+            )
+            return normalized not in YtDlpService._NON_CAPTION_SUBTITLE_KEYS
+
         def extract(key: str) -> tuple[str, ...]:
             tracks = info.get(key) or {}
             if not isinstance(tracks, dict):
@@ -332,7 +349,7 @@ class YtDlpService:
             languages = {
                 str(language).strip()
                 for language in tracks.keys()
-                if str(language).strip()
+                if is_regular_caption_key(language)
             }
             return tuple(sorted(languages, key=str.lower))
 
