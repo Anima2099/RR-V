@@ -28,6 +28,24 @@ QLabel#versionLabel {
     color: #7D8179;
 }
 
+QPushButton#sidebarToggleButton {
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+    padding: 0px;
+    border: none;
+    border-radius: 8px;
+    background-color: transparent;
+    color: #4B554F;
+    font-size: 13pt;
+    font-weight: 700;
+}
+
+QPushButton#sidebarToggleButton:hover {
+    background-color: #E0E5DE;
+}
+
 QPushButton#navButton {
     min-height: 48px;
     padding-left: 18px;
