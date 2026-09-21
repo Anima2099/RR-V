@@ -289,7 +289,7 @@ class DownloadStabilityTests(unittest.TestCase):
         class FakeProcess:
             pid = 4321
             stdout = [
-                "RRV_PROGRESS|downloading|1|10|0|1.0MiB/s|00:01\n",
+                "plain yt-dlp diagnostic output\n",
                 "RRV_OUTPUT|C:/fake/result.mp4\n",
             ]
 
