@@ -20,6 +20,11 @@ _PRERELEASE_TAG_MARKERS = ("beta", "alpha", "preview", "pre", "rc")
 _INSTALLER_NAME_PREFIX = "rr-v_setup_"
 _INSTALLER_MAX_SIZE = 300 * 1024 * 1024
 _RELEASE_NOTES_STOP_HEADINGS = (
+    "설치 방법",
+    "설치 안내",
+    "install guide",
+    "installation guide",
+    "how to install",
     "installer 검증",
     "인스톨러 검증",
     "지원 환경",
