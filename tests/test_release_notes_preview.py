@@ -180,6 +180,26 @@ class ReleaseNotesPreviewTests(unittest.TestCase):
         self.assertIn("자막", preview)
         self.assertIn("• 자막 선택 개선", preview)
 
+    def test_install_changes_heading_is_not_treated_as_instructions(self) -> None:
+        body = """# RR-V 1.5.0
+
+## 주요 변경사항
+
+### 설치
+- 신규 설치 감지 안정화
+- 기존 설치 업데이트 경로 개선
+
+### 다운로드
+- 다운로드 안정성 개선
+"""
+
+        preview = release_notes_preview(body)
+
+        self.assertIn("설치", preview)
+        self.assertIn("• 신규 설치 감지 안정화", preview)
+        self.assertIn("• 기존 설치 업데이트 경로 개선", preview)
+        self.assertIn("• 다운로드 안정성 개선", preview)
+
     def test_preview_stops_before_download_assets_section(self) -> None:
         body = """# RR-V 1.5.0
 
