@@ -449,17 +449,6 @@ class DownloadPage(QWidget):
             self.toast.show_message("실패한 작업에서만 에러 로그를 저장할 수 있습니다.")
             return
 
-        try:
-            report = build_download_problem_report(task)
-        except Exception as error:
-            write_download_event(
-                "support_report.failed",
-                task_id=task.task_id,
-                error=type(error).__name__,
-            )
-            self.toast.show_message("에러 로그를 만들지 못했습니다.")
-            return
-
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_name = f"RR-V_Error_{timestamp}.txt"
         selected_path, _selected_filter = QFileDialog.getSaveFileName(
@@ -474,6 +463,20 @@ class DownloadPage(QWidget):
         destination = Path(selected_path)
         if destination.suffix.lower() != ".txt":
             destination = destination.with_suffix(".txt")
+
+        self.toast.show_message("에러 로그를 준비하는 중…")
+        QApplication.processEvents()
+
+        try:
+            report = build_download_problem_report(task)
+        except Exception as error:
+            write_download_event(
+                "support_report.failed",
+                task_id=task.task_id,
+                error=type(error).__name__,
+            )
+            self.toast.show_message("에러 로그를 만들지 못했습니다.")
+            return
 
         try:
             destination.write_text(report, encoding="utf-8")
