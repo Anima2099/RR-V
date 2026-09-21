@@ -36,6 +36,7 @@ class SupportReportTests(unittest.TestCase):
                 url=(
                     "https://www.youtube.com/watch?v=abc123"
                     "&pot=TOP_SECRET_URL&sig=TOP_SECRET_SIG"
+                    "&token=TOP_SECRET_GENERIC"
                 ),
                 status=DownloadStatus.FAILED,
                 extractor="youtube",
@@ -75,6 +76,7 @@ class SupportReportTests(unittest.TestCase):
             "TOP_SECRET_PO",
             "TOP_SECRET_URL",
             "TOP_SECRET_SIG",
+            "TOP_SECRET_GENERIC",
             "TOP_SECRET_DETAIL",
             "TOP_SECRET_DETAIL_COOKIE",
         ):
