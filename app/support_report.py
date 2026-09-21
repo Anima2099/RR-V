@@ -18,12 +18,12 @@ def _redact_sensitive_text(text: object, task: DownloadTask) -> str:
     sanitized = str(text or "")
 
     sanitized = re.sub(
-        r"(?i)(\bAuthorization\s*:\s*).*$",
+        r"(?im)(\bAuthorization\s*:\s*)[^\r\n]*",
         r"\1<redacted>",
         sanitized,
     )
     sanitized = re.sub(
-        r"(?i)(\bCookie\s*:\s*).*$",
+        r"(?im)(\bCookie\s*:\s*)[^\r\n]*",
         r"\1<redacted>",
         sanitized,
     )
