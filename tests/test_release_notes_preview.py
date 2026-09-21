@@ -107,6 +107,18 @@ class ReleaseNotesPreviewTests(unittest.TestCase):
         self.assertIn("• 변경사항 0", preview)
         self.assertTrue(preview.endswith("…"))
 
+    def test_default_preview_budget_is_large_enough_for_full_change_list(self) -> None:
+        body = "# RR-V 1.5.0\n\n## 변경사항\n" + "\n".join(
+            f"- 변경사항 {index}" for index in range(30)
+        ) + "\n\n### 다운로드\nRR-V_Setup_1.5.0.exe"
+
+        preview = release_notes_preview(body)
+
+        self.assertIn("• 변경사항 0", preview)
+        self.assertIn("• 변경사항 29", preview)
+        self.assertNotIn("RR-V_Setup_1.5.0.exe", preview)
+        self.assertFalse(preview.endswith("…"))
+
     def test_empty_release_body_is_harmless(self) -> None:
         self.assertEqual(release_notes_preview(None), "")
         self.assertEqual(release_notes_preview("   \n\n"), "")
@@ -147,14 +159,42 @@ class ReleaseNotesPreviewTests(unittest.TestCase):
         self.assertIn("result.release_notes if result.update_available else", source)
         self.assertIn("RR-V {version} 변경사항", source)
 
-    def test_auto_update_prompt_contains_short_release_notes_preview(self) -> None:
+    def test_preview_stops_before_download_assets_section(self) -> None:
+        body = """# RR-V 1.5.0
+
+## 변경사항
+- 기능 A
+- 기능 B
+
+### 다운로드
+RR-V_Setup_1.5.0.exe
+
+SHA-256
+ABCDEF
+"""
+
+        preview = release_notes_preview(body)
+
+        self.assertIn("• 기능 A", preview)
+        self.assertIn("• 기능 B", preview)
+        self.assertNotIn("RR-V_Setup_1.5.0.exe", preview)
+        self.assertNotIn("SHA-256", preview)
+
+    def test_auto_update_prompt_uses_scrollable_release_notes(self) -> None:
         source = MAIN_WINDOW_PATH.read_text(encoding="utf-8")
+        dialog_source = (
+            ROOT / "ui" / "dialogs" / "warm_dialogs.py"
+        ).read_text(encoding="utf-8")
 
         self.assertIn("release_notes_preview(", source)
-        self.assertIn("max_lines=7", source)
-        self.assertIn("max_chars=650", source)
-        self.assertIn("이번 업데이트", source)
-        self.assertIn("notes_detail", source)
+        self.assertNotIn("max_lines=7", source)
+        self.assertNotIn("max_chars=650", source)
+        self.assertIn("ask_warm_scrollable_question(", source)
+        self.assertIn('detail_title="이번 업데이트"', source)
+        self.assertIn("class WarmScrollableQuestionDialog", dialog_source)
+        self.assertIn('setObjectName("releaseNotesView")', dialog_source)
+        self.assertIn("setMaximumHeight(260)", dialog_source)
+        self.assertIn("setReadOnly(True)", dialog_source)
 
 
 if __name__ == "__main__":
