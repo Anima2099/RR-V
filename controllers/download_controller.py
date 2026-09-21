@@ -24,6 +24,7 @@ class DownloadController(QObject):
     download_succeeded = Signal(str, str, str)
     download_failed = Signal(str, str, str)
     download_cancelled = Signal(str, str)
+    download_runtime_ended = Signal(str, bool)
     download_finished = Signal(str)
 
     def __init__(self, parent: QObject | None = None) -> None:
@@ -152,8 +153,18 @@ class DownloadController(QObject):
 
     def _download_worker_finished(self, task_id: str) -> None:
         worker = self._download_worker
+        process_running = False
+        if worker is not None:
+            process_running = worker.has_running_process
+            if process_running:
+                # Worker가 끝났는데 자식 yt-dlp만 남는 비정상 상태라면 다음
+                # 다운로드와 겹치지 않도록 잔여 프로세스 정리를 한 번 시도한다.
+                worker.cancel()
+                process_running = worker.has_running_process
+
         self._download_worker = None
         self._active_download_task_id = ""
+        self.download_runtime_ended.emit(task_id, process_running)
         if worker is not None:
             worker.deleteLater()
         self.download_finished.emit(task_id)
