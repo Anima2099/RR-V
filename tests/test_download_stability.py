@@ -6,9 +6,24 @@ import unittest
 from unittest.mock import patch
 
 from app import download_log
+from core.download_task import (
+    DownloadStatus,
+    DownloadTask,
+    is_orphaned_download_task,
+)
+from services.download_service import YtDlpDownloadService
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _task(status: DownloadStatus) -> DownloadTask:
+    return DownloadTask(
+        task_id="orphan-test",
+        title="고립 감지 테스트",
+        url="https://example.invalid/video",
+        status=status,
+    )
 
 
 class DownloadStabilityTests(unittest.TestCase):
@@ -93,6 +108,119 @@ class DownloadStabilityTests(unittest.TestCase):
         self.assertLess(command_ready, start_requested)
         self.assertLess(start_requested, popen)
         self.assertLess(popen, process_started)
+
+    def test_orphan_guard_requires_both_runtime_layers_to_be_gone(self) -> None:
+        for status in (
+            DownloadStatus.DOWNLOADING,
+            DownloadStatus.POSTPROCESSING,
+        ):
+            with self.subTest(status=status):
+                task = _task(status)
+                self.assertTrue(
+                    is_orphaned_download_task(
+                        task,
+                        worker_running=False,
+                        process_running=False,
+                    )
+                )
+                self.assertFalse(
+                    is_orphaned_download_task(
+                        task,
+                        worker_running=True,
+                        process_running=False,
+                    )
+                )
+                self.assertFalse(
+                    is_orphaned_download_task(
+                        task,
+                        worker_running=False,
+                        process_running=True,
+                    )
+                )
+
+    def test_orphan_guard_ignores_terminal_and_queued_states(self) -> None:
+        for status in (
+            DownloadStatus.ANALYZING,
+            DownloadStatus.QUEUED,
+            DownloadStatus.COMPLETED,
+            DownloadStatus.FAILED,
+            DownloadStatus.STOPPED,
+        ):
+            with self.subTest(status=status):
+                self.assertFalse(
+                    is_orphaned_download_task(
+                        _task(status),
+                        worker_running=False,
+                        process_running=False,
+                    )
+                )
+
+    def test_process_state_check_is_conservative(self) -> None:
+        service = YtDlpDownloadService()
+
+        class FakeProcess:
+            def __init__(self, result: int | None = None, fail: bool = False) -> None:
+                self.result = result
+                self.fail = fail
+
+            def poll(self) -> int | None:
+                if self.fail:
+                    raise OSError("poll unavailable")
+                return self.result
+
+        service._process = FakeProcess(result=None)  # type: ignore[assignment]
+        self.assertTrue(service.has_running_process)
+
+        service._process = FakeProcess(result=0)  # type: ignore[assignment]
+        self.assertFalse(service.has_running_process)
+
+        service._process = FakeProcess(fail=True)  # type: ignore[assignment]
+        self.assertTrue(service.has_running_process)
+
+        service._process = None
+        self.assertFalse(service.has_running_process)
+
+    def test_controller_reports_runtime_state_before_queue_continues(self) -> None:
+        path = ROOT / "controllers" / "download_controller.py"
+        source = path.read_text(encoding="utf-8")
+        ast.parse(source, filename=str(path))
+
+        finished = source[
+            source.index("    def _download_worker_finished("):
+        ]
+        self.assertIn("worker.has_running_process", finished)
+        self.assertIn("worker.cancel()", finished)
+        self.assertIn("self.download_runtime_ended.emit(", finished)
+        self.assertIn("self.download_finished.emit(", finished)
+        self.assertLess(
+            finished.index("self.download_runtime_ended.emit("),
+            finished.index("self.download_finished.emit("),
+        )
+
+    def test_page_defers_orphan_verification_before_next_queue_item(self) -> None:
+        path = ROOT / "ui" / "pages" / "download_page.py"
+        source = path.read_text(encoding="utf-8")
+        ast.parse(source, filename=str(path))
+
+        runtime = source[
+            source.index("    def _download_runtime_ended("):
+            source.index("    def _download_finished(", source.index("    def _download_runtime_ended("))
+        ]
+        finished = source[
+            source.index("    def _download_finished("):
+            source.index(
+                "    # ------------------------------------------------------------------",
+                source.index("    def _download_finished("),
+            )
+        ]
+
+        self.assertIn("QTimer.singleShot(", runtime)
+        self.assertIn("_verify_download_runtime_ended", runtime)
+        self.assertIn("is_orphaned_download_task(", runtime)
+        self.assertIn("self._download_failed(", runtime)
+        self.assertIn("download.orphaned_task_recovered", runtime)
+        self.assertIn("QTimer.singleShot(120, self._start_next_queue_task)", finished)
+
 
     def test_download_logger_catches_broad_environment_failures(self) -> None:
         path = ROOT / "app" / "download_log.py"
