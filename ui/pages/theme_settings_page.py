@@ -755,6 +755,9 @@ class ThemeSettingsPage(SettingsPage):
             self.open_tools_requested.emit()
 
     def _start_latest_updates(self) -> None:
+        if self._tool_action_running:
+            return
+
         installing = bool(self._missing_runtime_keys)
         repairing = bool(self._repair_runtime_keys)
         if installing or repairing:
@@ -796,6 +799,7 @@ class ThemeSettingsPage(SettingsPage):
         ):
             return
 
+        self._tool_action_running = True
         self.latest_update_button.setEnabled(False)
         self.component_check_button.setEnabled(False)
         self.tool_action_status.emit(status_text)
@@ -807,6 +811,7 @@ class ThemeSettingsPage(SettingsPage):
         threading.Thread(target=run, daemon=True).start()
 
     def _tool_action_done(self, ok: bool, message: str) -> None:
+        self._tool_action_running = False
         if hasattr(self, "component_check_button"):
             self.component_check_button.setEnabled(True)
 
