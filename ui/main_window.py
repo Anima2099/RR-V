@@ -32,7 +32,11 @@ from ui.pages.about_page import AboutPage
 from ui.pages.download_page_chapters import DownloadPage
 from ui.pages.media_tools_page import MediaToolsPage
 from ui.pages.unified_settings_page import UnifiedSettingsPage
-from ui.dialogs.warm_dialogs import ask_warm_question, show_warm_message
+from ui.dialogs.warm_dialogs import (
+    ask_warm_question,
+    ask_warm_scrollable_question,
+    show_warm_message,
+)
 from ui.sidebar import Sidebar
 
 
@@ -162,37 +166,42 @@ class MainWindow(QMainWindow):
         installer = getattr(result, "installer", None)
         release_notes = release_notes_preview(
             getattr(result, "release_notes", ""),
-            max_lines=7,
-            max_chars=650,
-        )
-        notes_detail = (
-            f"\n\n이번 업데이트\n{release_notes}"
-            if release_notes
-            else ""
         )
         if self.isVisible():
             if installer is not None:
-                detail = (
-                    message
-                    + notes_detail
-                    + "\n\n인스톨러를 다운로드하고 필수 검증을 완료한 뒤\n자동으로 RR-V를 종료하고 설치 프로그램을 실행합니다."
+                footer = (
+                    "인스톨러를 다운로드하고 필수 검증을 완료한 뒤\n"
+                    "자동으로 RR-V를 종료하고 설치 프로그램을 실행합니다."
                 )
                 yes_text = "업데이트"
             else:
-                detail = (
-                    message
-                    + notes_detail
-                    + "\n\n자동 설치용 검증 정보를 확인하지 못해 GitHub 릴리스 페이지를 엽니다."
+                footer = (
+                    "자동 설치용 검증 정보를 확인하지 못해 "
+                    "GitHub 릴리스 페이지를 엽니다."
                 )
                 yes_text = "릴리스 페이지"
 
-            if ask_warm_question(
-                self,
-                "RR-V 업데이트",
-                detail,
-                yes_text=yes_text,
-                no_text="나중에",
-            ):
+            if release_notes:
+                accepted = ask_warm_scrollable_question(
+                    self,
+                    "RR-V 업데이트",
+                    message,
+                    release_notes,
+                    detail_title="이번 업데이트",
+                    footer=footer,
+                    yes_text=yes_text,
+                    no_text="나중에",
+                )
+            else:
+                accepted = ask_warm_question(
+                    self,
+                    "RR-V 업데이트",
+                    message + "\n\n" + footer,
+                    yes_text=yes_text,
+                    no_text="나중에",
+                )
+
+            if accepted:
                 self._request_app_update_install(result)
             return
 
