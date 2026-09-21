@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 import tempfile
 import unittest
@@ -112,7 +113,15 @@ class LogResilienceTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("def _safe_console_print", source)
-        self.assertEqual(source.count("print("), 1)
+        app_tree = ast.parse(source)
+        app_print_calls = [
+            node
+            for node in ast.walk(app_tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "print"
+        ]
+        self.assertEqual(len(app_print_calls), 1)
         self.assertIn(
             '_safe_console_print(f"RR-V performance log: {performance_log_path()}")',
             source,
@@ -126,7 +135,15 @@ class LogResilienceTests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "main.py"
         ).read_text(encoding="utf-8")
         self.assertIn("def _safe_console_print", main_source)
-        self.assertEqual(main_source.count("print("), 2)
+        main_tree = ast.parse(main_source)
+        main_print_calls = [
+            node
+            for node in ast.walk(main_tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "print"
+        ]
+        self.assertEqual(len(main_print_calls), 1)
         self.assertIn(
             "RR-V browser integration registration sync failed",
             main_source,
