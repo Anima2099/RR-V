@@ -122,6 +122,20 @@ class LogResilienceTests(unittest.TestCase):
             source,
         )
 
+        main_source = (
+            Path(__file__).resolve().parents[1] / "main.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("def _safe_console_print", main_source)
+        self.assertEqual(main_source.count("print("), 2)
+        self.assertIn(
+            "RR-V browser integration registration sync failed",
+            main_source,
+        )
+        self.assertIn(
+            "RR-V Windows startup registration sync failed",
+            main_source,
+        )
+
     def test_performance_log_is_fail_soft_for_console_and_file_errors(self) -> None:
         encoding_error = UnicodeEncodeError(
             "cp949",
