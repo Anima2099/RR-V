@@ -151,7 +151,7 @@ class SupportReportTests(unittest.TestCase):
         self.assertNotIn("QApplication.clipboard().setText(report)", page_source)
         self.assertIn('self.toast.show_message("에러 로그를 저장했습니다.")', page_source)
         self.assertIn(
-            "Chrome·Edge·Vivaldi·Brave 같은 Chromium 브라우저 창이 잠시 열렸다가",
+            "Chromium 브라우저 창이 잠시 열렸다가 자동으로 닫힐 수 있으며 정상",
             settings_source,
         )
 
