@@ -111,7 +111,7 @@ def _tool_status_lines() -> list[str]:
 
 
 def build_download_problem_report(task: DownloadTask) -> str:
-    """실패 작업을 외부에 공유하기 쉬운 진단 텍스트로 만든다."""
+    """실패 작업을 외부에 공유하기 쉬운 에러 로그 텍스트로 만든다."""
 
     url = _redact_sensitive_text(task.url, task)
     error_message = _redact_sensitive_text(task.error_message, task) or "-"
@@ -128,7 +128,7 @@ def build_download_problem_report(task: DownloadTask) -> str:
     ) or "-"
 
     lines = [
-        "=== RR-V 문제 보고 정보 ===",
+        "=== RR-V 에러 로그 ===",
         f"RR-V: {APP_VERSION}",
         f"OS: {platform.platform()}",
         f"Python: {sys.version.split()[0]}",
