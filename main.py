@@ -37,6 +37,13 @@ def _prepare_windowed_stdio() -> None:
         sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 
+def _safe_console_print(text: str) -> None:
+    try:
+        print(text, flush=True)
+    except Exception:
+        pass
+
+
 def main() -> int:
     _prepare_windowed_stdio()
     app = create_application(sys.argv)
@@ -86,7 +93,9 @@ def main() -> int:
     try:
         sync_browser_integration_registration()
     except Exception as error:
-        print(f"RR-V browser integration registration sync failed: {error}")
+        _safe_console_print(
+            f"RR-V browser integration registration sync failed: {error}"
+        )
 
     if general_preferences.start_with_windows and not startup_hidden_requested:
         try:
@@ -95,7 +104,9 @@ def main() -> int:
                 start_hidden=general_preferences.minimize_to_tray_on_close,
             )
         except WindowsStartupError as error:
-            print(f"RR-V Windows startup registration sync failed: {error}")
+            _safe_console_print(
+                f"RR-V Windows startup registration sync failed: {error}"
+            )
 
     # 테마 선택과 Dark SVG 경로를 먼저 확정한 뒤 UI 모듈을 불러온다.
     # 기존 MainWindow의 구조는 유지하고 1.4 챕터 설정 화면만 주입한다.
