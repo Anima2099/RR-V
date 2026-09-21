@@ -33,7 +33,11 @@ def _redact_sensitive_text(text: object, task: DownloadTask) -> str:
         sanitized,
     )
     sanitized = re.sub(
-        r"(?i)([?&](?:pot|sig|lsig|spc|bui|cps|n)=)[^&\s\"]+",
+        (
+            r"(?i)([?&](?:pot|sig|lsig|spc|bui|cps|n|token|access_token|"
+            r"refresh_token|auth|authorization|api_key|apikey|session|"
+            r"sessionid|jwt)=)[^&\s\"]+"
+        ),
         r"\1<redacted>",
         sanitized,
     )
