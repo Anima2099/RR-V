@@ -333,6 +333,7 @@ class DownloadStabilityTests(unittest.TestCase):
                     "services.download_service.subprocess.Popen",
                     return_value=FakeProcess(),
                 ),
+                patch("services.download_service.write_download_event"),
             ):
                 result = service.download(
                     task,
