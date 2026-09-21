@@ -133,14 +133,15 @@ class YtDlpDownloadService:
         self.ffmpeg = find_executable("ffmpeg.exe")
         self.ffprobe = find_executable("ffprobe.exe")
         self._process: subprocess.Popen[str] | None = None
+        self._last_process: subprocess.Popen[str] | None = None
         self._process_lock = threading.Lock()
 
     @property
     def has_running_process(self) -> bool:
-        """현재 서비스가 실제로 살아 있는 yt-dlp 프로세스를 보유하는지 확인한다."""
+        """현재 또는 마지막 yt-dlp 프로세스가 실제로 살아 있는지 확인한다."""
 
         with self._process_lock:
-            process = self._process
+            process = self._process or self._last_process
         if process is None:
             return False
         try:
@@ -259,6 +260,7 @@ class YtDlpDownloadService:
 
         with self._process_lock:
             self._process = process
+            self._last_process = process
 
         on_process(process.pid)
         write_download_event(
@@ -384,10 +386,16 @@ class YtDlpDownloadService:
 
     def cancel(self) -> None:
         with self._process_lock:
-            process = self._process
+            process = self._process or self._last_process
 
-        if process is None or process.poll() is not None:
+        if process is None:
             return
+        try:
+            if process.poll() is not None:
+                return
+        except Exception:
+            # 확인 실패는 종료로 간주하지 않고 정리를 계속 시도한다.
+            pass
 
         pid = process.pid
         try:
