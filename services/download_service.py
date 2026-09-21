@@ -135,6 +135,20 @@ class YtDlpDownloadService:
         self._process: subprocess.Popen[str] | None = None
         self._process_lock = threading.Lock()
 
+    @property
+    def has_running_process(self) -> bool:
+        """현재 서비스가 실제로 살아 있는 yt-dlp 프로세스를 보유하는지 확인한다."""
+
+        with self._process_lock:
+            process = self._process
+        if process is None:
+            return False
+        try:
+            return process.poll() is None
+        except Exception:
+            # 상태 확인 자체가 실패하면 살아 있는 쪽으로 보수적으로 판단한다.
+            return True
+
     def download(
         self,
         task: DownloadTask,
