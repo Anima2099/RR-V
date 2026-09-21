@@ -11,7 +11,7 @@ import sys
 import threading
 import unicodedata
 from time import perf_counter
-from typing import Callable
+from typing import Callable, TextIO
 
 from app.download_log import create_task_log_path, write_download_event
 from app.general_preferences import (
@@ -201,7 +201,7 @@ class YtDlpDownloadService:
                 )
         task.output_stem = output_stem
         task_log_path = create_task_log_path(task.task_id)
-        task.raw_log_path = str(task_log_path)
+        task.raw_log_path = ""
         command = self._build_command(
             task,
             save_directory,
@@ -270,51 +270,48 @@ class YtDlpDownloadService:
             raw_log=task_log_path,
         )
 
+        raw_log = self._open_raw_task_log(
+            task_log_path,
+            task,
+            command,
+        )
         try:
-            with task_log_path.open("w", encoding="utf-8") as raw_log:
-                raw_log.write("RR-V yt-dlp task log\n")
-                raw_log.write(f"Task: {task.task_id}\n")
-                raw_log.write(f"Title: {task.title}\n")
-                raw_log.write(f"URL: {task.url}\n")
-                raw_log.write(f"Authentication: {YtDlpService.authentication_summary(task.url)}\n")
-                raw_log.write(f"JavaScript runtime: {YtDlpService.javascript_runtime_summary(task.url)}\n")
-                raw_log.write(f"YouTube support runtime: {YtDlpService.youtube_support_runtime_summary(task.url)}\n")
-                raw_log.write(f"Command: {self._display_command(command)}\n")
-                raw_log.write("=" * 72 + "\n")
-                raw_log.flush()
+            assert process.stdout is not None
+            for raw_line in process.stdout:
+                line = raw_line.rstrip("\r\n")
+                line = self._sanitize_log_line(line, task.url)
+                raw_log = self._write_raw_task_log(
+                    raw_log,
+                    line + "\n",
+                    task_log_path,
+                    task,
+                )
+                captured_lines.append(line)
+                if len(captured_lines) > 300:
+                    captured_lines.pop(0)
 
-                assert process.stdout is not None
-                for raw_line in process.stdout:
-                    line = raw_line.rstrip("\r\n")
-                    line = self._sanitize_log_line(line, task.url)
-                    raw_log.write(line + "\n")
-                    raw_log.flush()
-                    captured_lines.append(line)
-                    if len(captured_lines) > 300:
-                        captured_lines.pop(0)
+                if cancel_event.is_set():
+                    self.cancel()
+                    raise DownloadCancelledError("다운로드 중지됨")
 
-                    if cancel_event.is_set():
-                        self.cancel()
-                        raise DownloadCancelledError("다운로드 중지됨")
+                if line.startswith(self.PROGRESS_PREFIX):
+                    self._handle_progress_line(
+                        line,
+                        on_progress,
+                        on_phase,
+                        progress_bytes,
+                    )
+                    continue
 
-                    if line.startswith(self.PROGRESS_PREFIX):
-                        self._handle_progress_line(
-                            line,
-                            on_progress,
-                            on_phase,
-                            progress_bytes,
-                        )
-                        continue
+                if line.startswith(self.OUTPUT_PREFIX):
+                    final_output = line[len(self.OUTPUT_PREFIX):].strip()
+                    continue
 
-                    if line.startswith(self.OUTPUT_PREFIX):
-                        final_output = line[len(self.OUTPUT_PREFIX):].strip()
-                        continue
+                phase = self._phase_from_line(line)
+                if phase is not None:
+                    on_phase(*phase)
 
-                    phase = self._phase_from_line(line)
-                    if phase is not None:
-                        on_phase(*phase)
-
-                return_code = process.wait()
+            return_code = process.wait()
         except DownloadCancelledError:
             write_download_event(
                 "download.cancelled",
@@ -325,10 +322,11 @@ class YtDlpDownloadService:
         except OSError as error:
             self.cancel()
             raise DownloadExecutionError(
-                "다운로드 로그를 기록하는 과정에서 문제가 발생했습니다.",
+                "yt-dlp 실행 결과를 읽는 과정에서 문제가 발생했습니다.",
                 str(error),
             ) from error
         finally:
+            self._close_raw_task_log(raw_log)
             with self._process_lock:
                 self._process = None
             cleanup_cookie_work_copy_from_command(command)
@@ -361,7 +359,10 @@ class YtDlpDownloadService:
         if not resolved_output:
             raise DownloadExecutionError(
                 "다운로드는 끝났지만 완성된 파일 위치를 확인하지 못했습니다.",
-                f"저장 폴더: {save_directory}\n원본 로그: {task_log_path}",
+                (
+                    f"저장 폴더: {save_directory}\n"
+                    f"원본 로그: {task.raw_log_path or '기록하지 못함'}"
+                ),
             )
 
         if task.embed_subtitles and not task.audio_only:
@@ -377,12 +378,101 @@ class YtDlpDownloadService:
             task_id=task.task_id,
             elapsed_ms=f"{elapsed_ms:.1f}",
             output=resolved_output,
-            raw_log=task_log_path,
+            raw_log=task.raw_log_path or "unavailable",
         )
         return DownloadResult(
             output_file=str(resolved_output),
-            raw_log_path=str(task_log_path),
+            raw_log_path=task.raw_log_path,
         )
+
+    @staticmethod
+    def _open_raw_task_log(
+        path: Path,
+        task: DownloadTask,
+        command: list[str],
+    ) -> TextIO | None:
+        handle: TextIO | None = None
+        try:
+            handle = path.open("w", encoding="utf-8")
+            handle.write("RR-V yt-dlp task log\n")
+            handle.write(f"Task: {task.task_id}\n")
+            handle.write(f"Title: {task.title}\n")
+            handle.write(f"URL: {task.url}\n")
+            handle.write(
+                "Authentication: "
+                + YtDlpService.authentication_summary(task.url)
+                + "\n"
+            )
+            handle.write(
+                "JavaScript runtime: "
+                + YtDlpService.javascript_runtime_summary(task.url)
+                + "\n"
+            )
+            handle.write(
+                "YouTube support runtime: "
+                + YtDlpService.youtube_support_runtime_summary(task.url)
+                + "\n"
+            )
+            handle.write(
+                f"Command: {YtDlpDownloadService._display_command(command)}\n"
+            )
+            handle.write("=" * 72 + "\n")
+            handle.flush()
+        except Exception as error:
+            if handle is not None:
+                try:
+                    handle.close()
+                except Exception:
+                    pass
+            task.raw_log_path = ""
+            write_download_event(
+                "download.raw_log_unavailable",
+                task_id=task.task_id,
+                stage="open_or_header",
+                raw_log=path,
+                error=repr(error),
+            )
+            return None
+
+        task.raw_log_path = str(path)
+        return handle
+
+    @staticmethod
+    def _write_raw_task_log(
+        handle: TextIO | None,
+        text: str,
+        path: Path,
+        task: DownloadTask,
+    ) -> TextIO | None:
+        if handle is None:
+            return None
+        try:
+            handle.write(text)
+            handle.flush()
+            return handle
+        except Exception as error:
+            try:
+                handle.close()
+            except Exception:
+                pass
+            task.raw_log_path = ""
+            write_download_event(
+                "download.raw_log_disabled",
+                task_id=task.task_id,
+                stage="stream_write",
+                raw_log=path,
+                error=repr(error),
+            )
+            return None
+
+    @staticmethod
+    def _close_raw_task_log(handle: TextIO | None) -> None:
+        if handle is None:
+            return
+        try:
+            handle.close()
+        except Exception:
+            pass
 
     def cancel(self) -> None:
         with self._process_lock:
