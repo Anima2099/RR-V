@@ -14,6 +14,7 @@ from core.download_task import (
     DownloadTask,
     is_orphaned_download_task,
 )
+from controllers.download_controller import DownloadController
 from services.download_service import YtDlpDownloadService
 
 
@@ -345,6 +346,58 @@ class DownloadStabilityTests(unittest.TestCase):
 
         self.assertEqual(result.output_file, str(output))
         self.assertEqual(result.raw_log_path, "")
+
+    def test_lingering_process_keeps_controller_busy_and_cancelable(self) -> None:
+        class FakeWorker:
+            def __init__(self) -> None:
+                self.cancelled = False
+
+            def isRunning(self) -> bool:
+                return False
+
+            @property
+            def has_running_process(self) -> bool:
+                return True
+
+            def cancel(self) -> None:
+                self.cancelled = True
+
+        controller = DownloadController()
+        worker = FakeWorker()
+        controller._download_worker = worker  # type: ignore[assignment]
+        controller._active_download_task_id = "orphan-test"
+
+        self.assertTrue(controller.is_downloading)
+        self.assertTrue(controller.cancel_download("orphan-test"))
+        self.assertTrue(worker.cancelled)
+
+    def test_controller_rechecks_lingering_process_before_releasing_worker(self) -> None:
+        path = ROOT / "controllers" / "download_controller.py"
+        source = path.read_text(encoding="utf-8")
+        ast.parse(source, filename=str(path))
+
+        finished = source[
+            source.index("    def _download_worker_finished("):
+            source.index(
+                "    def _recheck_finished_download_runtime(",
+                source.index("    def _download_worker_finished("),
+            )
+        ]
+        recheck = source[
+            source.index("    def _recheck_finished_download_runtime("):
+            source.index(
+                "    def _release_download_worker(",
+                source.index("    def _recheck_finished_download_runtime("),
+            )
+        ]
+
+        self.assertIn("if not process_running:", finished)
+        self.assertIn("self._release_download_worker(", finished)
+        self.assertIn("QTimer.singleShot(", finished)
+        self.assertIn("worker.has_running_process", recheck)
+        self.assertIn("QTimer.singleShot(", recheck)
+        self.assertIn("self._release_download_worker(", recheck)
+        self.assertIn("self.download_runtime_ended.emit(task_id, False)", recheck)
 
     def test_download_logger_catches_broad_environment_failures(self) -> None:
         path = ROOT / "app" / "download_log.py"
