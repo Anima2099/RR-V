@@ -569,6 +569,8 @@ class YtDlpDownloadService:
             kind, separator, code = encoded.partition(":")
             if not separator or not code:
                 continue
+            if not YtDlpService.is_regular_subtitle_key(code):
+                continue
             if kind == "manual":
                 manual_languages.append(code)
             elif kind == "auto":
