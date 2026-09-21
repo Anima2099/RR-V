@@ -165,6 +165,12 @@ class YtDlpDownloadService:
             )
 
         task.title = unicodedata.normalize("NFC", task.title)
+        write_download_event(
+            "download.prepare_started",
+            task_id=task.task_id,
+            title=task.title,
+            save_path=save_directory,
+        )
         collision_mode = load_general_preferences().file_collision_mode
         overwrite_existing = collision_mode == FILE_COLLISION_OVERWRITE
 
@@ -186,6 +192,12 @@ class YtDlpDownloadService:
             save_directory,
             output_stem,
             overwrite_existing=overwrite_existing,
+        )
+        write_download_event(
+            "download.command_ready",
+            task_id=task.task_id,
+            raw_log=task_log_path,
+            command_args=len(command),
         )
 
         write_download_event(
