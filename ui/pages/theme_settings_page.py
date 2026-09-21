@@ -26,7 +26,8 @@ from app.component_updates import (
     check_component_updates,
     normalize_ffmpeg_release_version,
 )
-from app.constants import APP_VERSION
+from app.app_update import UPDATE_CHANNEL_BETA, normalize_update_channel
+from app.constants import APP_RELEASE_CHANNEL, APP_VERSION
 from app.paths import RRV_LOGS_DIR, RRV_TOOLS_DIR
 from app.runtime_tool_installer import ensure_runtime_tools
 from app.theme import (
@@ -55,6 +56,14 @@ from ui.widgets.common import create_card
 GITHUB_PROFILE_URL = "https://github.com/Anima2099"
 BUY_ME_A_COFFEE_URL = "https://buymeacoffee.com/anima2099"
 _TOOL_DIAGNOSTIC_LATEST_PATH = RRV_LOGS_DIR / "tool_diagnostics_latest.txt"
+
+
+def _build_channel_label() -> str:
+    return (
+        "Community Beta"
+        if normalize_update_channel(APP_RELEASE_CHANNEL) == UPDATE_CHANNEL_BETA
+        else "Stable"
+    )
 
 
 class ThemeSettingsPage(SettingsPage):
@@ -135,7 +144,7 @@ class ThemeSettingsPage(SettingsPage):
         product = QLabel("Video Downloader & Media Tools")
         product.setObjectName("settingsGroupTitle")
 
-        version = QLabel(f"Version {APP_VERSION} · Community Beta")
+        version = QLabel(f"Version {APP_VERSION} · {_build_channel_label()}")
         version.setObjectName("mutedText")
 
         description = QLabel(
@@ -416,7 +425,7 @@ class ThemeSettingsPage(SettingsPage):
         return "\n".join(
             (
                 "RR-V 도구 진단 결과",
-                f"RR-V 버전: {APP_VERSION} Community Beta",
+                f"RR-V 버전: {APP_VERSION} {_build_channel_label()}",
                 f"진단 시각: {when.strftime('%Y-%m-%d %H:%M:%S')}",
                 "",
                 detail,
