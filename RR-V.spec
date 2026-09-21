@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# RR-V community beta · onedir packaging spec
+# RR-V · onedir packaging spec
 
 from pathlib import Path
 
