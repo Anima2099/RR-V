@@ -1699,6 +1699,20 @@ class DownloadPage(QWidget):
         task_id: str,
         process_running: bool,
     ) -> None:
+        # Worker가 마지막에 보낸 success/failed/cancelled 신호가 UI 이벤트 큐에
+        # 남아 있을 수 있으므로 한 턴 뒤에 최종 상태를 확인한다. 다음 큐 작업은
+        # _download_finished에서 120ms 뒤에 예약되므로 고립 판정이 먼저 끝난다.
+        QTimer.singleShot(
+            0,
+            lambda current=task_id, alive=process_running:
+                self._verify_download_runtime_ended(current, alive),
+        )
+
+    def _verify_download_runtime_ended(
+        self,
+        task_id: str,
+        process_running: bool,
+    ) -> None:
         task = self._task_by_id(task_id)
         if task is None:
             return
