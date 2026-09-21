@@ -108,6 +108,28 @@ class DownloadTask:
         return " · ".join(item for item in items if item)
 
 
+def is_orphaned_download_task(
+    task: DownloadTask,
+    *,
+    worker_running: bool,
+    process_running: bool,
+) -> bool:
+    """실행 주체가 모두 사라졌는데 작업 상태만 실행 중인지 확인한다.
+
+    시간 제한은 사용하지 않는다. Worker나 yt-dlp 프로세스 중 하나라도 실제로
+    살아 있으면 정상적으로 오래 걸리는 작업일 수 있으므로 고립으로 판단하지 않는다.
+    """
+
+    return (
+        task.status in {
+            DownloadStatus.DOWNLOADING,
+            DownloadStatus.POSTPROCESSING,
+        }
+        and not worker_running
+        and not process_running
+    )
+
+
 def remove_failed_tasks(
     tasks: list[DownloadTask],
 ) -> tuple[list[DownloadTask], list[str]]:
