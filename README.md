@@ -160,7 +160,7 @@ RR-V에는 Chromium 기반 브라우저용 **RR-V Browser Connector**가 포함�
 
 - **Windows 10 / Windows 11 · 64-bit**
 - 사이트 인증 브라우저: **Google Chrome · Microsoft Edge · Vivaldi · Brave**
-- Browser Connector: Chromium 기반 Chrome / Edge / Vivaldi 환경을 기본 지원
+- Browser Connector: Chromium 기반 브라우저 환경을 기본 지원
 
 영상 사이트의 정책 또는 구조 변경, yt-dlp의 현재 지원 상태, 사용자 PC 및 네트워크 환경에 따라 일부 사이트의 동작이 달라질 수 있습니다.
 
