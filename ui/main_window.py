@@ -113,6 +113,17 @@ class MainWindow(QMainWindow):
         shell_started = perf_counter()
         self.sidebar = Sidebar()
         self.sidebar.page_requested.connect(self.show_page)
+        self.sidebar.collapsed_changed.connect(
+            self._sidebar_collapsed_changed
+        )
+        self.sidebar.set_collapsed(
+            self.settings.value(
+                "window/sidebar_collapsed",
+                False,
+                type=bool,
+            ),
+            emit=False,
+        )
 
         root = QWidget()
         root.setObjectName("rootWidget")
@@ -353,6 +364,17 @@ class MainWindow(QMainWindow):
         self.settings.setValue(
             "window/current_page",
             self.pages.currentIndex(),
+        )
+        self.settings.setValue(
+            "window/sidebar_collapsed",
+            self.sidebar.is_collapsed,
+        )
+        self.settings.sync()
+
+    def _sidebar_collapsed_changed(self, collapsed: bool) -> None:
+        self.settings.setValue(
+            "window/sidebar_collapsed",
+            bool(collapsed),
         )
         self.settings.sync()
 
