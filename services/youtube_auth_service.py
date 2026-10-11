@@ -86,7 +86,7 @@ def _missing_browser_result() -> YouTubeLoginResult:
         cookie_count=0,
         compact_window=False,
         hidden_after_login=False,
-        message="Chrome / Vivaldi / Edge / Brave를 찾지 못했습니다.",
+        message="Google Chrome 또는 Microsoft Edge를 찾지 못했습니다.",
     )
 
 

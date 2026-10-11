@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
@@ -31,6 +32,7 @@ from app.general_preferences import (
     resolved_download_directory,
 )
 from app.queue_store import QueueLoadResult, load_queue, save_queue
+from app.support_report import build_download_problem_report
 from app.notifications import play_completion_sound
 from app.paths import (
     COLLAPSE_ICON_PATH,
@@ -49,7 +51,11 @@ from app.url_list_io import (
 )
 from controllers.download_controller import DownloadController
 from core.batch_entry import BatchEntry
-from core.download_task import DownloadStatus, DownloadTask
+from core.download_task import (
+    DownloadStatus,
+    DownloadTask,
+    is_orphaned_download_task,
+)
 from core.media_info import MediaInfo
 from ui.dialogs.batch_add_dialog import BatchAddDialog
 from ui.dialogs.duplicate_url_dialog import (
@@ -149,6 +155,9 @@ class DownloadPage(QWidget):
         self.controller.download_succeeded.connect(self._download_succeeded)
         self.controller.download_failed.connect(self._download_failed)
         self.controller.download_cancelled.connect(self._download_cancelled)
+        self.controller.download_runtime_ended.connect(
+            self._download_runtime_ended
+        )
         self.controller.download_finished.connect(self._download_finished)
 
         main_layout = QVBoxLayout(self)
@@ -421,6 +430,9 @@ class DownloadPage(QWidget):
         self.task_list.subtitle_recovery_requested.connect(
             self._recover_task_subtitle
         )
+        self.task_list.error_log_requested.connect(
+            self._save_error_log
+        )
         self.scroll_area.setWidget(self.task_list)
 
         self.empty_list_card = empty_card
@@ -428,6 +440,61 @@ class DownloadPage(QWidget):
         self.list_stack.addWidget(self.scroll_area)
         layout.addWidget(self.list_stack, 1)
         return page
+
+    def _save_error_log(self, task_id: str) -> None:
+        task = self._task_by_id(task_id)
+        if task is None:
+            return
+        if task.status is not DownloadStatus.FAILED:
+            self.toast.show_message("실패한 작업에서만 에러 로그를 저장할 수 있습니다.")
+            return
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"RR-V_Error_{timestamp}.txt"
+        selected_path, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "에러 로그 저장",
+            default_name,
+            "텍스트 파일 (*.txt)",
+        )
+        if not selected_path:
+            return
+
+        destination = Path(selected_path)
+        if destination.suffix.lower() != ".txt":
+            destination = destination.with_suffix(".txt")
+
+        self.toast.show_message("에러 로그를 준비하는 중…")
+        QApplication.processEvents()
+
+        try:
+            report = build_download_problem_report(task)
+        except Exception as error:
+            write_download_event(
+                "support_report.failed",
+                task_id=task.task_id,
+                error=type(error).__name__,
+            )
+            self.toast.show_message("에러 로그를 만들지 못했습니다.")
+            return
+
+        try:
+            destination.write_text(report, encoding="utf-8")
+        except OSError as error:
+            write_download_event(
+                "support_report.save_failed",
+                task_id=task.task_id,
+                error=type(error).__name__,
+            )
+            show_warm_message(
+                self,
+                "에러 로그 저장 실패",
+                "선택한 위치에 에러 로그를 저장하지 못했습니다.\n"
+                "다른 위치를 선택해 다시 시도해 주세요.",
+            )
+            return
+
+        self.toast.show_message("에러 로그를 저장했습니다.")
 
     def _create_editor_page(self) -> QWidget:
         page = QWidget()
@@ -1686,6 +1753,74 @@ class DownloadPage(QWidget):
         self.task_list.refresh_task_status(task_id)
         self._schedule_queue_save()
         self.toast.show_message(message)
+
+    def _download_runtime_ended(
+        self,
+        task_id: str,
+        process_running: bool,
+    ) -> None:
+        # Worker가 마지막에 보낸 success/failed/cancelled 신호가 UI 이벤트 큐에
+        # 남아 있을 수 있으므로 한 턴 뒤에 최종 상태를 확인한다. 다음 큐 작업은
+        # _download_finished에서 120ms 뒤에 예약되므로 고립 판정이 먼저 끝난다.
+        QTimer.singleShot(
+            0,
+            lambda current=task_id, alive=process_running:
+                self._verify_download_runtime_ended(current, alive),
+        )
+
+    def _verify_download_runtime_ended(
+        self,
+        task_id: str,
+        process_running: bool,
+    ) -> None:
+        task = self._task_by_id(task_id)
+        if task is None:
+            return
+
+        if process_running:
+            if task.status in {
+                DownloadStatus.DOWNLOADING,
+                DownloadStatus.POSTPROCESSING,
+            }:
+                # Worker 종료 후에도 실제 프로세스가 남아 있으면 고립 판정 조건은
+                # 충족하지 않는다. 다만 새 작업이 겹치지 않도록 대기열은 멈춘다.
+                self._queue_running = False
+                self._queue_waiting_for_analysis = False
+                write_download_event(
+                    "download.runtime_process_still_alive",
+                    task_id=task_id,
+                    status=task.status.value,
+                    pid=task.process_id,
+                )
+                self.toast.show_message(
+                    "다운로드 프로세스 종료 상태를 확인하지 못해 대기열을 일시 중지했습니다."
+                )
+                self._refresh_list_state()
+            return
+
+        if not is_orphaned_download_task(
+            task,
+            worker_running=False,
+            process_running=False,
+        ):
+            return
+
+        previous_status = task.status
+        write_download_event(
+            "download.orphaned_task_recovered",
+            task_id=task_id,
+            previous_status=previous_status.value,
+            progress=task.progress,
+            raw_log=task.raw_log_path or "-",
+        )
+        self._download_failed(
+            task_id,
+            "다운로드 작업이 예상치 못하게 종료되었습니다. 다시 시도해 주세요.",
+            (
+                "DownloadWorker와 yt-dlp 프로세스가 모두 종료됐지만 "
+                f"작업 상태가 {previous_status.value!r}에 남아 있었습니다."
+            ),
+        )
 
     def _download_finished(self, _task_id: str) -> None:
         self._refresh_list_state()

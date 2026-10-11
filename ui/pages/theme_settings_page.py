@@ -26,7 +26,8 @@ from app.component_updates import (
     check_component_updates,
     normalize_ffmpeg_release_version,
 )
-from app.constants import APP_VERSION
+from app.app_update import UPDATE_CHANNEL_BETA, normalize_update_channel
+from app.constants import APP_RELEASE_CHANNEL, APP_VERSION
 from app.paths import RRV_LOGS_DIR, RRV_TOOLS_DIR
 from app.runtime_tool_installer import ensure_runtime_tools
 from app.theme import (
@@ -55,6 +56,14 @@ from ui.widgets.common import create_card
 GITHUB_PROFILE_URL = "https://github.com/Anima2099"
 BUY_ME_A_COFFEE_URL = "https://buymeacoffee.com/anima2099"
 _TOOL_DIAGNOSTIC_LATEST_PATH = RRV_LOGS_DIR / "tool_diagnostics_latest.txt"
+
+
+def _build_channel_label() -> str:
+    return (
+        "Community Beta"
+        if normalize_update_channel(APP_RELEASE_CHANNEL) == UPDATE_CHANNEL_BETA
+        else "Stable"
+    )
 
 
 class ThemeSettingsPage(SettingsPage):
@@ -135,7 +144,7 @@ class ThemeSettingsPage(SettingsPage):
         product = QLabel("Video Downloader & Media Tools")
         product.setObjectName("settingsGroupTitle")
 
-        version = QLabel(f"Version {APP_VERSION} · Community Beta")
+        version = QLabel(f"Version {APP_VERSION} · {_build_channel_label()}")
         version.setObjectName("mutedText")
 
         description = QLabel(
@@ -294,6 +303,15 @@ class ThemeSettingsPage(SettingsPage):
         self.component_update_status.setObjectName("mutedText")
         self.component_update_status.setWordWrap(True)
 
+        browser_hint = QLabel(
+            "YouTube 영상 정보 확인이나 다운로드 중 추가 인증(WPC)이 필요한 경우 "
+            "Chromium 브라우저 창이 잠시 열렸다가 자동으로 닫힐 수 있으며 정상 "
+            "동작입니다. WPC가 필요하지 않은 일반 "
+            "다운로드에서는 별도 브라우저 창을 열지 않습니다."
+        )
+        browser_hint.setObjectName("mutedText")
+        browser_hint.setWordWrap(True)
+
         open_button = QPushButton("도구 폴더 열기")
         open_button.setObjectName("secondaryButton")
         open_button.clicked.connect(self._open_tools_folder)
@@ -319,6 +337,7 @@ class ThemeSettingsPage(SettingsPage):
         layout.addWidget(description)
         layout.addLayout(tool_grid)
         layout.addWidget(self.component_update_status)
+        layout.addWidget(browser_hint)
         layout.addLayout(action_row)
         return card
 
@@ -406,7 +425,7 @@ class ThemeSettingsPage(SettingsPage):
         return "\n".join(
             (
                 "RR-V 도구 진단 결과",
-                f"RR-V 버전: {APP_VERSION} Community Beta",
+                f"RR-V 버전: {APP_VERSION} {_build_channel_label()}",
                 f"진단 시각: {when.strftime('%Y-%m-%d %H:%M:%S')}",
                 "",
                 detail,
@@ -755,6 +774,9 @@ class ThemeSettingsPage(SettingsPage):
             self.open_tools_requested.emit()
 
     def _start_latest_updates(self) -> None:
+        if self._tool_action_running:
+            return
+
         installing = bool(self._missing_runtime_keys)
         repairing = bool(self._repair_runtime_keys)
         if installing or repairing:
@@ -796,17 +818,26 @@ class ThemeSettingsPage(SettingsPage):
         ):
             return
 
+        self._tool_action_running = True
         self.latest_update_button.setEnabled(False)
         self.component_check_button.setEnabled(False)
         self.tool_action_status.emit(status_text)
 
         def run() -> None:
-            ok, message = ensure_runtime_tools(self.tool_action_status.emit)
+            try:
+                ok, message = ensure_runtime_tools(self.tool_action_status.emit)
+            except Exception as error:
+                ok = False
+                message = (
+                    "필수 도구 확인 중 예상하지 못한 오류가 발생했습니다: "
+                    f"{error!r}"
+                )
             self.tool_action_finished.emit(ok, message)
 
         threading.Thread(target=run, daemon=True).start()
 
     def _tool_action_done(self, ok: bool, message: str) -> None:
+        self._tool_action_running = False
         if hasattr(self, "component_check_button"):
             self.component_check_button.setEnabled(True)
 

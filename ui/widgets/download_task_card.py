@@ -116,6 +116,7 @@ class DownloadTaskCard(QFrame):
     path_changed = Signal(str)
     thumbnail_recovery_requested = Signal(str)
     subtitle_recovery_requested = Signal(str)
+    error_log_requested = Signal(str)
 
     def __init__(self, task: DownloadTask, index_number: int) -> None:
         total_started = perf_counter()
@@ -330,6 +331,15 @@ class DownloadTaskCard(QFrame):
         button_row = QHBoxLayout()
         button_row.addStretch()
 
+        self.error_log_button = QPushButton("에러 로그 저장하기")
+        self.error_log_button.setObjectName("smallSecondaryButton")
+        self.error_log_button.setToolTip(
+            "RR-V 버전, 오류 정보, 도구 상태와 정리된 로그를 TXT 파일로 저장"
+        )
+        self.error_log_button.clicked.connect(
+            lambda: self.error_log_requested.emit(self.task.task_id)
+        )
+
         log_button = QPushButton("원본 로그 보기")
         log_button.setObjectName("smallSecondaryButton")
         log_button.clicked.connect(self._open_raw_log)
@@ -338,6 +348,7 @@ class DownloadTaskCard(QFrame):
         copy_log_button.setObjectName("smallSecondaryButton")
         copy_log_button.clicked.connect(self._copy_raw_log)
 
+        button_row.addWidget(self.error_log_button)
         button_row.addWidget(log_button)
         button_row.addWidget(copy_log_button)
 
@@ -386,6 +397,9 @@ class DownloadTaskCard(QFrame):
 
         self.error_label.setText(self.task.error_message)
         self.error_label.setVisible(bool(self.task.error_message))
+        self.error_log_button.setVisible(
+            self.task.status is DownloadStatus.FAILED
+        )
 
         active_statuses = {
             DownloadStatus.DOWNLOADING,

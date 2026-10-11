@@ -14,20 +14,33 @@ _LOCK = Lock()
 _INITIALIZED = False
 
 
+def _safe_console_print(text: str) -> None:
+    try:
+        print(text, flush=True)
+    except Exception:
+        pass
+
+
 def initialize_performance_log() -> None:
     global _INITIALIZED
     if _INITIALIZED:
         return
+    try:
 
-    ensure_runtime_directories()
-    session_line = (
-        "\n"
-        + "=" * 72
-        + f"\nRR-V performance session: {datetime.now():%Y-%m-%d %H:%M:%S}\n"
-        + "=" * 72
-        + "\n"
-    )
-    _append_text(PERFORMANCE_LOG_PATH, session_line)
+        ensure_runtime_directories()
+        session_line = (
+            "\n"
+            + "=" * 72
+            + f"\nRR-V performance session: {datetime.now():%Y-%m-%d %H:%M:%S}\n"
+            + "=" * 72
+            + "\n"
+        )
+        _append_text(PERFORMANCE_LOG_PATH, session_line)
+    except Exception as error:
+        _safe_console_print(
+            f"RR-V perf log initialization failed: {error!r}"
+        )
+        return
     _INITIALIZED = True
 
 
@@ -36,18 +49,24 @@ def write_performance(
     duration_ms: float | None = None,
     **fields: Any,
 ) -> None:
-    initialize_performance_log()
+    try:
+        initialize_performance_log()
 
-    parts = [f"[{datetime.now():%H:%M:%S.%f}"[:-3] + "]", event]
-    if duration_ms is not None:
-        parts.append(f"{duration_ms:.3f} ms")
-    for key, value in fields.items():
-        parts.append(f"{key}={value}")
+        parts = [f"[{datetime.now():%H:%M:%S.%f}"[:-3] + "]", event]
+        if duration_ms is not None:
+            parts.append(f"{duration_ms:.3f} ms")
+        for key, value in fields.items():
+            parts.append(f"{key}={value}")
 
-    line = " | ".join(parts)
-    print(f"[PERF] {line}", flush=True)
+        line = " | ".join(parts)
+    except Exception as error:
+        _safe_console_print(
+            f"RR-V perf log event failed: {error!r}"
+        )
+        return
+
+    _safe_console_print(f"[PERF] {line}")
     _append_text(PERFORMANCE_LOG_PATH, line + "\n")
-
 
 class PerformanceSpan(AbstractContextManager["PerformanceSpan"]):
     def __init__(self, event: str, **fields: Any) -> None:
@@ -79,5 +98,7 @@ def _append_text(path: Path, text: str) -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as log_file:
                 log_file.write(text)
-    except OSError as error:
-        print(f"RR-V performance log write failed: {error}", flush=True)
+    except Exception as error:
+        _safe_console_print(
+            f"RR-V perf log write failed: {error!r}"
+        )

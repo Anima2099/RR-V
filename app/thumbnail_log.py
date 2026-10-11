@@ -15,32 +15,51 @@ _LOCK = Lock()
 _INITIALIZED = False
 
 
+def _safe_console_print(text: str) -> None:
+    try:
+        print(text, flush=True)
+    except Exception:
+        pass
+
+
 def initialize_thumbnail_log() -> None:
     global _INITIALIZED
     if _INITIALIZED:
         return
-    ensure_runtime_directories()
-    THUMBNAIL_TASK_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    header = (
-        "\n"
-        + "=" * 72
-        + f"\nRR-V thumbnail session: {datetime.now():%Y-%m-%d %H:%M:%S}\n"
-        + "=" * 72
-        + "\n"
-    )
-    _append(THUMBNAIL_LOG_PATH, header)
+    try:
+        ensure_runtime_directories()
+        THUMBNAIL_TASK_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        header = (
+            "\n"
+            + "=" * 72
+            + f"\nRR-V thumbnail session: {datetime.now():%Y-%m-%d %H:%M:%S}\n"
+            + "=" * 72
+            + "\n"
+        )
+        _append(THUMBNAIL_LOG_PATH, header)
+    except Exception as error:
+        _safe_console_print(
+            f"RR-V thumbnail log initialization failed: {error!r}"
+        )
+        return
     _INITIALIZED = True
 
 
 def write_thumbnail_event(event: str, **fields: Any) -> None:
-    initialize_thumbnail_log()
-    parts = [f"[{datetime.now():%H:%M:%S.%f}"[:-3] + "]", event]
-    for key, value in fields.items():
-        parts.append(f"{key}={value}")
-    line = " | ".join(parts)
-    print(f"[THUMBNAIL] {line}", flush=True)
-    _append(THUMBNAIL_LOG_PATH, line + "\n")
+    try:
+        initialize_thumbnail_log()
+        parts = [f"[{datetime.now():%H:%M:%S.%f}"[:-3] + "]", event]
+        for key, value in fields.items():
+            parts.append(f"{key}={value}")
+        line = " | ".join(parts)
+    except Exception as error:
+        _safe_console_print(
+            f"RR-V thumbnail log event failed: {error!r}"
+        )
+        return
 
+    _safe_console_print(f"[THUMBNAIL] {line}")
+    _append(THUMBNAIL_LOG_PATH, line + "\n")
 
 def create_thumbnail_task_log_path() -> Path:
     initialize_thumbnail_log()
@@ -63,5 +82,7 @@ def _append(path: Path, text: str) -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(text)
-    except OSError as error:
-        print(f"RR-V thumbnail log write failed: {error}", flush=True)
+    except Exception as error:
+        _safe_console_print(
+            f"RR-V thumbnail log write failed: {error!r}"
+        )

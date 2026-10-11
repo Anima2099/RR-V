@@ -170,12 +170,26 @@ class AppUpdateChannelTests(unittest.TestCase):
         payload = [self._release(f"v{APP_VERSION}", prerelease=False)]
         fetch.return_value = json.dumps(payload).encode("utf-8")
 
-        result = check_app_update(update_channel=UPDATE_CHANNEL_STABLE)
+        with patch("app.app_update.APP_RELEASE_CHANNEL", UPDATE_CHANNEL_BETA):
+            result = check_app_update(update_channel=UPDATE_CHANNEL_STABLE)
 
         self.assertTrue(result.update_available)
         self.assertEqual(result.latest_version, APP_VERSION)
         self.assertEqual(result.latest_release_channel, UPDATE_CHANNEL_STABLE)
         self.assertIn("같은 번호의 정식 버전", result.message)
+
+    @patch("app.app_update.fetch_https_bytes")
+    def test_current_stable_does_not_update_to_same_version_stable(self, fetch) -> None:  # type: ignore[no-untyped-def]
+        payload = [self._release(f"v{APP_VERSION}", prerelease=False)]
+        fetch.return_value = json.dumps(payload).encode("utf-8")
+
+        with patch("app.app_update.APP_RELEASE_CHANNEL", UPDATE_CHANNEL_STABLE):
+            result = check_app_update(update_channel=UPDATE_CHANNEL_STABLE)
+
+        self.assertFalse(result.update_available)
+        self.assertEqual(result.latest_version, APP_VERSION)
+        self.assertEqual(result.latest_release_channel, UPDATE_CHANNEL_STABLE)
+        self.assertIn("최신 버전을 사용하고 있습니다", result.message)
 
     @patch("app.app_update.fetch_https_bytes")
     def test_stable_channel_reports_no_release_when_only_beta_exists(self, fetch) -> None:  # type: ignore[no-untyped-def]

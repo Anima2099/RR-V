@@ -20,7 +20,11 @@ _PRERELEASE_TAG_MARKERS = ("beta", "alpha", "preview", "pre", "rc")
 _INSTALLER_NAME_PREFIX = "rr-v_setup_"
 _INSTALLER_MAX_SIZE = 300 * 1024 * 1024
 _RELEASE_NOTES_STOP_HEADINGS = (
-    "설치",
+    "설치 방법",
+    "설치 안내",
+    "install guide",
+    "installation guide",
+    "how to install",
     "installer 검증",
     "인스톨러 검증",
     "지원 환경",
@@ -62,11 +66,67 @@ def update_channel_label(value: str) -> str:
     return "베타" if normalize_update_channel(value) == UPDATE_CHANNEL_BETA else "정식"
 
 
+def _looks_like_release_asset_section(
+    raw_lines: list[str],
+    start_index: int,
+) -> bool:
+    """'다운로드' 제목이 실제 설치 파일/해시 영역인지 보수적으로 판별한다."""
+
+    for raw_line in raw_lines[start_index:]:
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        if re.match(r"^#{1,6}\s+", stripped):
+            break
+
+        cleaned = _strip_release_note_markdown(stripped)
+        folded = cleaned.casefold()
+
+        if re.search(r"rr-v[_\s-]*setup.*\.exe\b", folded):
+            return True
+        if re.fullmatch(r"sha-?256", folded):
+            return True
+
+    return False
+
+
+def _looks_like_release_installation_section(
+    raw_lines: list[str],
+    start_index: int,
+) -> bool:
+    """'설치' 제목이 변경사항이 아니라 실제 설치 안내인지 판별한다."""
+
+    for raw_line in raw_lines[start_index:]:
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        if re.match(r"^#{1,6}\s+", stripped):
+            break
+
+        cleaned = _strip_release_note_markdown(stripped)
+        folded = cleaned.casefold()
+        if not cleaned:
+            continue
+
+        if re.search(r"rr-v[_\s-]*setup.*\.exe\b", folded):
+            return True
+        if re.fullmatch(r"sha-?256", folded):
+            return True
+
+        # '설치'를 기능 변경 카테고리로 쓸 때는 보통 bullet 목록이다.
+        # 반대로 설치 절차/안내 문장은 일반 문장이나 번호 목록으로 시작한다.
+        if re.match(r"^[-*+]\s+", stripped):
+            return False
+        return True
+
+    return False
+
+
 def release_notes_preview(
     value: object,
     *,
-    max_lines: int = 20,
-    max_chars: int = 1800,
+    max_lines: int = 120,
+    max_chars: int = 12000,
 ) -> str:
     """GitHub Release 본문에서 앱 안에 보여줄 짧은 변경사항만 만든다.
 
@@ -84,8 +144,11 @@ def release_notes_preview(
     lines: list[str] = []
     max_lines = max(1, int(max_lines))
     max_chars = max(80, int(max_chars))
+    content_line_count = 0
+    truncated_by_lines = False
 
-    for raw_line in text.split("\n"):
+    raw_lines = text.split("\n")
+    for line_index, raw_line in enumerate(raw_lines):
         stripped = raw_line.strip()
         if re.fullmatch(r"[-*_]{3,}", stripped):
             continue
@@ -94,8 +157,22 @@ def release_notes_preview(
         if heading is not None:
             heading_text = _strip_release_note_markdown(heading.group(1))
             folded = heading_text.casefold()
+            download_heading = folded in {"다운로드", "download", "downloads"}
+            install_heading = folded in {"설치", "install", "installation"}
+            if download_heading and _looks_like_release_asset_section(
+                raw_lines,
+                line_index + 1,
+            ):
+                break
+            if install_heading and _looks_like_release_installation_section(
+                raw_lines,
+                line_index + 1,
+            ):
+                break
             if any(
-                folded == stop or folded.startswith(stop + " ") or folded.startswith(stop + ":")
+                folded == stop
+                or folded.startswith(stop + " ")
+                or folded.startswith(stop + ":")
                 for stop in _RELEASE_NOTES_STOP_HEADINGS
             ):
                 break
@@ -112,13 +189,17 @@ def release_notes_preview(
                 cleaned = _strip_release_note_markdown(stripped)
 
         if not cleaned:
+            # 읽기용 간격은 한 줄만 유지하되 max_lines에는 포함하지 않는다.
             if lines and lines[-1] != "":
                 lines.append("")
             continue
 
-        lines.append(cleaned)
-        if len(lines) >= max_lines:
+        if content_line_count >= max_lines:
+            truncated_by_lines = True
             break
+
+        lines.append(cleaned)
+        content_line_count += 1
 
     while lines and not lines[-1]:
         lines.pop()
@@ -132,7 +213,7 @@ def release_notes_preview(
         if last_break >= max_chars // 2:
             shortened = shortened[:last_break].rstrip()
         preview = shortened + "\n…"
-    elif len(lines) >= max_lines and len(text.split("\n")) > max_lines:
+    elif truncated_by_lines:
         preview = preview.rstrip() + "\n…"
     return preview
 

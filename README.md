@@ -8,11 +8,11 @@
 
 **RR-V**는 널리 사용되는 오픈소스 영상 다운로드 도구 **yt-dlp**를 복잡한 명령어 없이 쉽고 빠르게 사용할 수 있도록 만든 Windows용 비디오 다운로드 & 미디어 도구입니다.
 
-**현재 버전: 1.4.1 Community Beta**
+**현재 버전: 1.5.0 Stable**
 
 ➡️ **[최신 버전 다운로드 · GitHub Releases](https://github.com/Anima2099/RR-V/releases)**
 
-설치 파일은 GitHub Releases에서 `RR-V_Setup_1.4.1.exe` 형태로 배포합니다.
+설치 파일은 GitHub Releases에서 `RR-V_Setup_<버전>.exe` 형태로 배포합니다.
 
 ---
 
@@ -27,6 +27,7 @@
 - 여러 URL 자동 감지, 재생목록/여러 주소 일괄 추가 및 원하는 항목 선별 다운로드
 - 빠른 추가 후 자동 다운로드 옵션과 기존 순차 대기열 유지
 - 실패 작업 필터, 전체 재시도 및 실패 항목 일괄 삭제
+- 실패 작업의 오류 · 도구 상태 · 정리된 로그를 **에러 로그 TXT**로 저장
 - 전체 · 완료 · 실패 목록 TXT 내보내기 / 불러오기
 - 사용자 다운로드 프리셋 생성 · 수정 · 삭제 · 복제 및 기본 프리셋 지정
 - 파일명 템플릿과 제목/채널명/영상 ID/사이트/해상도/업로드 날짜/재생시간/프리셋/코덱 토큰 조합
@@ -37,7 +38,7 @@
 
 - YouTube · Instagram · TikTok RR-V 관리형 로그인
 - Google Chrome · Microsoft Edge 인증 브라우저 지원
-- Chrome / Edge용 **RR-V Browser Connector**
+- Chromium 기반 브라우저용 **RR-V Browser Connector**
 - RR-V 실행/트레이 상태에서는 빠른 로컬 연결, 완전 종료 상태에서는 Native Messaging 폴백
 - 브라우저 링크 전송 시 대기열 추가 또는 자동 다운로드 선택
 
@@ -56,6 +57,8 @@
 - yt-dlp / FFmpeg / FFprobe / Deno 상태 확인, 설치, 업데이트 및 복구
 - 업데이트 시 기존 RR-V 프로그램 파일을 새 버전 기준으로 정리하는 Clean Upgrade
 - 업데이트 시 사용자 선택에 따라 설정 · 로그인 · 프리셋 · 다운로드 도구 초기화 가능
+- RR-V 설정 · 프리셋의 백업 및 복구
+- 사이드바 접기 / 펼치기와 접힘 상태 기억
 - Light / Dark **Warm Sage** 테마
 
 ## 스크린샷
@@ -144,7 +147,7 @@ RR-V는 현재 다음 사이트의 자체 로그인 기능을 제공합니다.
 
 ## 브라우저 확장 프로그램
 
-RR-V에는 Chrome / Edge용 **RR-V Browser Connector**가 포함되어 있습니다.
+RR-V에는 Chromium 기반 브라우저용 **RR-V Browser Connector**가 포함되어 있습니다.
 
 확장 프로그램을 설치하면 영상 페이지에서 RR-V 아이콘을 누르거나 영상 링크의 오른쪽 클릭 메뉴를 사용하여 현재 URL을 RR-V 다운로드 목록으로 바로 보낼 수 있습니다.
 
@@ -160,15 +163,17 @@ RR-V에는 Chrome / Edge용 **RR-V Browser Connector**가 포함되어 있습니
 
 - **Windows 10 / Windows 11 · 64-bit**
 - 사이트 인증 브라우저: **Google Chrome · Microsoft Edge**
-- Browser Connector: Chromium 기반 Chrome / Edge 환경을 기본 지원
+- Browser Connector: Chromium 기반 브라우저 환경을 기본 지원
 
 영상 사이트의 정책 또는 구조 변경, yt-dlp의 현재 지원 상태, 사용자 PC 및 네트워크 환경에 따라 일부 사이트의 동작이 달라질 수 있습니다.
 
-## Community Beta
+## Stable 릴리스
 
-RR-V 1.4.1은 **Community Beta** 버전이며, 1.4.0 신규 설치 시 일부 환경에서 발생할 수 있던 Installer 초기화 오류를 수정한 핫픽스입니다.
+RR-V 1.5.0부터 기본 공개 릴리스는 **Stable** 채널을 기준으로 배포합니다. 베타 채널은 이후 새 기능을 먼저 시험할 필요가 있을 때 선택적으로 사용할 수 있습니다.
 
-설치와 업그레이드, 사용자 데이터 보존/초기화, 영상 다운로드, 빠른 추가 자동 다운로드, 사이트 인증, Browser Connector, 미디어 도구 및 자체 업데이트 등의 주요 동작은 실제 Windows 환경에서 테스트를 거쳤습니다.
+1.5.0에서는 Community Beta 기간에 확인된 사용 흐름을 바탕으로 다운로드 로그와 예외 처리, 설정 백업/복구, 잔여 다운로드 프로세스 처리, Release Notes 표시, 사이드바 접기/상태 기억, 실패 작업의 에러 로그 TXT 저장 등 안정성과 유지보수 편의성을 보강했습니다.
+
+설치와 업그레이드, 사용자 데이터 보존/초기화, 영상 다운로드, 빠른 추가 자동 다운로드, 사이트 인증, Browser Connector, 미디어 도구 및 자체 업데이트 등의 주요 동작은 실제 Windows 환경에서 계속 점검합니다.
 
 문제를 발견했다면 GitHub Issues 또는 아래 연락처를 통해 알려주세요.
 
@@ -226,7 +231,7 @@ dist/RR-V/
   _internal/
 ```
 
-The Community Beta Installer is built with Inno Setup 7 as a **per-user installation**. It does not request administrator elevation. The default installation directory is shown to the user and may be changed:
+The RR-V Installer is built with Inno Setup 7 as a **per-user installation**. It does not request administrator elevation. The default installation directory is shown to the user and may be changed:
 
 ```text
 %LOCALAPPDATA%\Programs\RR-V
@@ -368,4 +373,4 @@ External yt-dlp / FFmpeg / Deno executables downloaded after installation remain
 
 ## Project Status
 
-Version-specific development and release preparation may take place on version branches such as `<version>-community-beta`. The `main` branch is used as the public release source line, while previous tagged releases remain available through GitHub Releases and their preserved refs.
+Version-specific development and release preparation may take place on dedicated feature or release branches. The `main` branch is used as the public release source line, while previous tagged releases remain available through GitHub Releases and their preserved refs.

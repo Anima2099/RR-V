@@ -105,6 +105,85 @@ class WarmQuestionDialog(_WarmBaseDialog):
         no_button.setFocus()
 
 
+class WarmScrollableQuestionDialog(_WarmBaseDialog):
+    """짧은 안내와 긴 읽기 전용 내용을 분리해 보여주는 확인창."""
+
+    def __init__(
+        self,
+        title: str,
+        message: str,
+        detail: str,
+        parent: QWidget | None = None,
+        *,
+        detail_title: str = "",
+        footer: str = "",
+        yes_text: str = "예",
+        no_text: str = "아니오",
+    ) -> None:
+        super().__init__(title, message, parent, minimum_width=520)
+        self.setMaximumWidth(720)
+
+        if detail_title:
+            detail_label = QLabel(detail_title)
+            detail_label.setObjectName("dialogStatusText")
+            self.root_layout.addWidget(detail_label)
+
+        detail_view = QPlainTextEdit()
+        detail_view.setObjectName("releaseNotesView")
+        detail_view.setReadOnly(True)
+        detail_view.setPlainText(str(detail or "").strip())
+        detail_view.setMinimumHeight(130)
+        detail_view.setMaximumHeight(260)
+        detail_view.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        if active_theme_mode() == THEME_DARK:
+            detail_view.setStyleSheet(
+                "QPlainTextEdit#releaseNotesView {"
+                "background-color: #252D29;"
+                "color: #E2E7E3;"
+                "border: 1px solid #46514B;"
+                "border-radius: 8px;"
+                "padding: 8px;"
+                "selection-background-color: #7EA2B3;"
+                "selection-color: #202723;"
+                "}"
+            )
+        else:
+            detail_view.setStyleSheet(
+                "QPlainTextEdit#releaseNotesView {"
+                "background-color: #FCF9F1;"
+                "color: #34413C;"
+                "border: 1px solid #C5C4BD;"
+                "border-radius: 8px;"
+                "padding: 8px;"
+                "selection-background-color: #608598;"
+                "selection-color: #FFFDF8;"
+                "}"
+            )
+        self.root_layout.addWidget(detail_view)
+
+        if footer:
+            footer_label = QLabel(footer)
+            footer_label.setObjectName("emptyDescription")
+            footer_label.setWordWrap(True)
+            self.root_layout.addWidget(footer_label)
+
+        row = self._button_row()
+        yes_button = QPushButton(yes_text)
+        yes_button.setObjectName("primaryButton")
+        yes_button.clicked.connect(self.accept)
+
+        no_button = QPushButton(no_text)
+        no_button.setObjectName("secondaryButton")
+        no_button.clicked.connect(self.reject)
+        no_button.setDefault(True)
+
+        row.addWidget(yes_button)
+        row.addWidget(no_button)
+        self.root_layout.addSpacing(4)
+        self.root_layout.addLayout(row)
+        no_button.setFocus()
+
+
 class WarmTextInputDialog(_WarmBaseDialog):
     def __init__(
         self,
@@ -268,6 +347,30 @@ def ask_warm_question(
         title,
         message,
         parent,
+        yes_text=yes_text,
+        no_text=no_text,
+    )
+    return dialog.exec() == QDialog.DialogCode.Accepted
+
+
+def ask_warm_scrollable_question(
+    parent: QWidget | None,
+    title: str,
+    message: str,
+    detail: str,
+    *,
+    detail_title: str = "",
+    footer: str = "",
+    yes_text: str = "예",
+    no_text: str = "아니오",
+) -> bool:
+    dialog = WarmScrollableQuestionDialog(
+        title,
+        message,
+        detail,
+        parent,
+        detail_title=detail_title,
+        footer=footer,
         yes_text=yes_text,
         no_text=no_text,
     )

@@ -11,7 +11,7 @@ import sys
 import threading
 import unicodedata
 from time import perf_counter
-from typing import Callable
+from typing import Callable, TextIO
 
 from app.download_log import create_task_log_path, write_download_event
 from app.general_preferences import (
@@ -133,7 +133,22 @@ class YtDlpDownloadService:
         self.ffmpeg = find_executable("ffmpeg.exe")
         self.ffprobe = find_executable("ffprobe.exe")
         self._process: subprocess.Popen[str] | None = None
+        self._last_process: subprocess.Popen[str] | None = None
         self._process_lock = threading.Lock()
+
+    @property
+    def has_running_process(self) -> bool:
+        """현재 또는 마지막 yt-dlp 프로세스가 실제로 살아 있는지 확인한다."""
+
+        with self._process_lock:
+            process = self._process or self._last_process
+        if process is None:
+            return False
+        try:
+            return process.poll() is None
+        except Exception:
+            # 상태 확인 자체가 실패하면 살아 있는 쪽으로 보수적으로 판단한다.
+            return True
 
     def download(
         self,
@@ -165,6 +180,12 @@ class YtDlpDownloadService:
             )
 
         task.title = unicodedata.normalize("NFC", task.title)
+        write_download_event(
+            "download.prepare_started",
+            task_id=task.task_id,
+            title=task.title,
+            save_path=save_directory,
+        )
         collision_mode = load_general_preferences().file_collision_mode
         overwrite_existing = collision_mode == FILE_COLLISION_OVERWRITE
 
@@ -180,12 +201,18 @@ class YtDlpDownloadService:
                 )
         task.output_stem = output_stem
         task_log_path = create_task_log_path(task.task_id)
-        task.raw_log_path = str(task_log_path)
+        task.raw_log_path = ""
         command = self._build_command(
             task,
             save_directory,
             output_stem,
             overwrite_existing=overwrite_existing,
+        )
+        write_download_event(
+            "download.command_ready",
+            task_id=task.task_id,
+            raw_log=task_log_path,
+            command_args=len(command),
         )
 
         write_download_event(
@@ -233,6 +260,7 @@ class YtDlpDownloadService:
 
         with self._process_lock:
             self._process = process
+            self._last_process = process
 
         on_process(process.pid)
         write_download_event(
@@ -242,51 +270,48 @@ class YtDlpDownloadService:
             raw_log=task_log_path,
         )
 
+        raw_log = self._open_raw_task_log(
+            task_log_path,
+            task,
+            command,
+        )
         try:
-            with task_log_path.open("w", encoding="utf-8") as raw_log:
-                raw_log.write("RR-V yt-dlp task log\n")
-                raw_log.write(f"Task: {task.task_id}\n")
-                raw_log.write(f"Title: {task.title}\n")
-                raw_log.write(f"URL: {task.url}\n")
-                raw_log.write(f"Authentication: {YtDlpService.authentication_summary(task.url)}\n")
-                raw_log.write(f"JavaScript runtime: {YtDlpService.javascript_runtime_summary(task.url)}\n")
-                raw_log.write(f"YouTube support runtime: {YtDlpService.youtube_support_runtime_summary(task.url)}\n")
-                raw_log.write(f"Command: {self._display_command(command)}\n")
-                raw_log.write("=" * 72 + "\n")
-                raw_log.flush()
+            assert process.stdout is not None
+            for raw_line in process.stdout:
+                line = raw_line.rstrip("\r\n")
+                line = self._sanitize_log_line(line, task.url)
+                raw_log = self._write_raw_task_log(
+                    raw_log,
+                    line + "\n",
+                    task_log_path,
+                    task,
+                )
+                captured_lines.append(line)
+                if len(captured_lines) > 300:
+                    captured_lines.pop(0)
 
-                assert process.stdout is not None
-                for raw_line in process.stdout:
-                    line = raw_line.rstrip("\r\n")
-                    line = self._sanitize_log_line(line, task.url)
-                    raw_log.write(line + "\n")
-                    raw_log.flush()
-                    captured_lines.append(line)
-                    if len(captured_lines) > 300:
-                        captured_lines.pop(0)
+                if cancel_event.is_set():
+                    self.cancel()
+                    raise DownloadCancelledError("다운로드 중지됨")
 
-                    if cancel_event.is_set():
-                        self.cancel()
-                        raise DownloadCancelledError("다운로드 중지됨")
+                if line.startswith(self.PROGRESS_PREFIX):
+                    self._handle_progress_line(
+                        line,
+                        on_progress,
+                        on_phase,
+                        progress_bytes,
+                    )
+                    continue
 
-                    if line.startswith(self.PROGRESS_PREFIX):
-                        self._handle_progress_line(
-                            line,
-                            on_progress,
-                            on_phase,
-                            progress_bytes,
-                        )
-                        continue
+                if line.startswith(self.OUTPUT_PREFIX):
+                    final_output = line[len(self.OUTPUT_PREFIX):].strip()
+                    continue
 
-                    if line.startswith(self.OUTPUT_PREFIX):
-                        final_output = line[len(self.OUTPUT_PREFIX):].strip()
-                        continue
+                phase = self._phase_from_line(line)
+                if phase is not None:
+                    on_phase(*phase)
 
-                    phase = self._phase_from_line(line)
-                    if phase is not None:
-                        on_phase(*phase)
-
-                return_code = process.wait()
+            return_code = process.wait()
         except DownloadCancelledError:
             write_download_event(
                 "download.cancelled",
@@ -297,10 +322,11 @@ class YtDlpDownloadService:
         except OSError as error:
             self.cancel()
             raise DownloadExecutionError(
-                "다운로드 로그를 기록하는 과정에서 문제가 발생했습니다.",
+                "yt-dlp 실행 결과를 읽는 과정에서 문제가 발생했습니다.",
                 str(error),
             ) from error
         finally:
+            self._close_raw_task_log(raw_log)
             with self._process_lock:
                 self._process = None
             cleanup_cookie_work_copy_from_command(command)
@@ -317,7 +343,7 @@ class YtDlpDownloadService:
                 task_id=task.task_id,
                 return_code=return_code,
                 elapsed_ms=f"{elapsed_ms:.1f}",
-                raw_log=task_log_path,
+                raw_log=task.raw_log_path or "unavailable",
             )
             raise DownloadExecutionError(
                 self._friendly_error(detail, task.url),
@@ -333,7 +359,10 @@ class YtDlpDownloadService:
         if not resolved_output:
             raise DownloadExecutionError(
                 "다운로드는 끝났지만 완성된 파일 위치를 확인하지 못했습니다.",
-                f"저장 폴더: {save_directory}\n원본 로그: {task_log_path}",
+                (
+                    f"저장 폴더: {save_directory}\n"
+                    f"원본 로그: {task.raw_log_path or '기록하지 못함'}"
+                ),
             )
 
         if task.embed_subtitles and not task.audio_only:
@@ -349,19 +378,114 @@ class YtDlpDownloadService:
             task_id=task.task_id,
             elapsed_ms=f"{elapsed_ms:.1f}",
             output=resolved_output,
-            raw_log=task_log_path,
+            raw_log=task.raw_log_path or "unavailable",
         )
         return DownloadResult(
             output_file=str(resolved_output),
-            raw_log_path=str(task_log_path),
+            raw_log_path=task.raw_log_path,
         )
+
+    @staticmethod
+    def _open_raw_task_log(
+        path: Path,
+        task: DownloadTask,
+        command: list[str],
+    ) -> TextIO | None:
+        handle: TextIO | None = None
+        try:
+            handle = path.open("w", encoding="utf-8")
+            handle.write("RR-V yt-dlp task log\n")
+            handle.write(f"Task: {task.task_id}\n")
+            handle.write(f"Title: {task.title}\n")
+            handle.write(f"URL: {task.url}\n")
+            handle.write(
+                "Authentication: "
+                + YtDlpService.authentication_summary(task.url)
+                + "\n"
+            )
+            handle.write(
+                "JavaScript runtime: "
+                + YtDlpService.javascript_runtime_summary(task.url)
+                + "\n"
+            )
+            handle.write(
+                "YouTube support runtime: "
+                + YtDlpService.youtube_support_runtime_summary(task.url)
+                + "\n"
+            )
+            handle.write(
+                f"Command: {YtDlpDownloadService._display_command(command)}\n"
+            )
+            handle.write("=" * 72 + "\n")
+            handle.flush()
+        except Exception as error:
+            if handle is not None:
+                try:
+                    handle.close()
+                except Exception:
+                    pass
+            task.raw_log_path = ""
+            write_download_event(
+                "download.raw_log_unavailable",
+                task_id=task.task_id,
+                stage="open_or_header",
+                raw_log=path,
+                error=repr(error),
+            )
+            return None
+
+        task.raw_log_path = str(path)
+        return handle
+
+    @staticmethod
+    def _write_raw_task_log(
+        handle: TextIO | None,
+        text: str,
+        path: Path,
+        task: DownloadTask,
+    ) -> TextIO | None:
+        if handle is None:
+            return None
+        try:
+            handle.write(text)
+            handle.flush()
+            return handle
+        except Exception as error:
+            try:
+                handle.close()
+            except Exception:
+                pass
+            task.raw_log_path = ""
+            write_download_event(
+                "download.raw_log_disabled",
+                task_id=task.task_id,
+                stage="stream_write",
+                raw_log=path,
+                error=repr(error),
+            )
+            return None
+
+    @staticmethod
+    def _close_raw_task_log(handle: TextIO | None) -> None:
+        if handle is None:
+            return
+        try:
+            handle.close()
+        except Exception:
+            pass
 
     def cancel(self) -> None:
         with self._process_lock:
-            process = self._process
+            process = self._process or self._last_process
 
-        if process is None or process.poll() is not None:
+        if process is None:
             return
+        try:
+            if process.poll() is not None:
+                return
+        except Exception:
+            # 확인 실패는 종료로 간주하지 않고 정리를 계속 시도한다.
+            pass
 
         pid = process.pid
         try:
@@ -444,6 +568,8 @@ class YtDlpDownloadService:
         for encoded in task.subtitle_tracks:
             kind, separator, code = encoded.partition(":")
             if not separator or not code:
+                continue
+            if not YtDlpService.is_regular_subtitle_key(code):
                 continue
             if kind == "manual":
                 manual_languages.append(code)
@@ -840,11 +966,16 @@ class YtDlpDownloadService:
             return YtDlpService._friendly_error(detail, url)
         if any(token in lowered for token in ("unsupported url", "no suitable extractor")):
             return "현재 yt-dlp가 지원하지 않는 주소로 보입니다."
+        if any(
+            token in lowered
+            for token in ("unable to download video subtitles", "unable to download subtitles")
+        ):
+            return "자막 다운로드에 실패했습니다. 원본 로그에서 상세 원인을 확인해 주세요."
         if "http error 403" in lowered or "403: forbidden" in lowered:
             if YtDlpService.is_youtube_url(url):
                 return "YouTube에서 영상 스트림 접근을 거부했습니다. (HTTP 403) 원본 로그에서 인증 상세 정보를 확인해 주세요."
             return "사이트에서 영상 스트림 접근을 거부했습니다. (HTTP 403) 원본 로그에서 상세 원인을 확인해 주세요."
-        if any(token in lowered for token in ("unable to download", "network", "timed out")):
+        if any(token in lowered for token in ("network", "timed out")):
             return "네트워크 문제로 다운로드를 계속하지 못했습니다."
         return "다운로드 중 오류가 발생했습니다. 상세 로그에서 원인을 확인할 수 있습니다."
 

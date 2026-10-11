@@ -11,27 +11,47 @@ _LOCK = Lock()
 _INITIALIZED = False
 
 
+def _safe_console_print(text: str) -> None:
+    try:
+        print(text, flush=True)
+    except Exception:
+        pass
+
+
 def initialize_subtitle_log() -> None:
     global _INITIALIZED
     if _INITIALIZED:
         return
-    ensure_runtime_directories()
-    SUBTITLE_TASK_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    _append(
-        SUBTITLE_LOG_PATH,
-        "\n" + "=" * 72 + f"\nRR-V subtitle session: {datetime.now():%Y-%m-%d %H:%M:%S}\n" + "=" * 72 + "\n",
-    )
+    try:
+        ensure_runtime_directories()
+        SUBTITLE_TASK_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        _append(
+            SUBTITLE_LOG_PATH,
+            "\n" + "=" * 72 + f"\nRR-V subtitle session: {datetime.now():%Y-%m-%d %H:%M:%S}\n" + "=" * 72 + "\n",
+        )
+    except Exception as error:
+        _safe_console_print(
+            f"RR-V subtitle log initialization failed: {error!r}"
+        )
+        return
     _INITIALIZED = True
 
 
 def write_subtitle_event(event: str, **fields: Any) -> None:
-    initialize_subtitle_log()
-    parts = [f"[{datetime.now():%H:%M:%S.%f}"[:-3] + "]", event]
-    parts.extend(f"{key}={value}" for key, value in fields.items())
-    line = " | ".join(parts)
-    print(f"[SUBTITLE] {line}", flush=True)
-    _append(SUBTITLE_LOG_PATH, line + "\n")
+    try:
+        initialize_subtitle_log()
+        parts = [f"[{datetime.now():%H:%M:%S.%f}"[:-3] + "]", event]
+        for key, value in fields.items():
+            parts.append(f"{key}={value}")
+        line = " | ".join(parts)
+    except Exception as error:
+        _safe_console_print(
+            f"RR-V subtitle log event failed: {error!r}"
+        )
+        return
 
+    _safe_console_print(f"[SUBTITLE] {line}")
+    _append(SUBTITLE_LOG_PATH, line + "\n")
 
 def create_subtitle_task_log_path() -> Path:
     initialize_subtitle_log()
@@ -54,5 +74,7 @@ def _append(path: Path, text: str) -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(text)
-    except OSError as error:
-        print(f"RR-V subtitle log write failed: {error}", flush=True)
+    except Exception as error:
+        _safe_console_print(
+            f"RR-V subtitle log write failed: {error!r}"
+        )
