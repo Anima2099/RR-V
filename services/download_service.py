@@ -970,7 +970,12 @@ class YtDlpDownloadService:
             if YtDlpService.is_youtube_url(url):
                 return "YouTube에서 영상 스트림 접근을 거부했습니다. (HTTP 403) 원본 로그에서 인증 상세 정보를 확인해 주세요."
             return "사이트에서 영상 스트림 접근을 거부했습니다. (HTTP 403) 원본 로그에서 상세 원인을 확인해 주세요."
-        if any(token in lowered for token in ("unable to download", "network", "timed out")):
+        if any(
+            token in lowered
+            for token in ("unable to download video subtitles", "unable to download subtitles")
+        ):
+            return "자막 다운로드에 실패했습니다. 원본 로그에서 상세 원인을 확인해 주세요."
+        if any(token in lowered for token in ("network", "timed out")):
             return "네트워크 문제로 다운로드를 계속하지 못했습니다."
         return "다운로드 중 오류가 발생했습니다. 상세 로그에서 원인을 확인할 수 있습니다."
 
