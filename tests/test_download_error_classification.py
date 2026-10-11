@@ -22,6 +22,7 @@ class DownloadErrorClassificationTests(unittest.TestCase):
     def test_other_subtitle_failures_remain_identifiable(self) -> None:
         for detail in (
             "ERROR: Unable to download subtitles for 'en': HTTP Error 429",
+            "ERROR: Unable to download video subtitles for 'ko': HTTP Error 403",
             "ERROR: Unable to download video subtitles for 'ja': timed out",
         ):
             with self.subTest(detail=detail):
