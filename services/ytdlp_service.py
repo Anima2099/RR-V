@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -394,10 +395,30 @@ class YtDlpService:
             if deno is not None:
                 command.extend(["--js-runtimes", f"deno:{deno}"])
 
-            # 기본 YouTube client는 yt-dlp가 선택한다. WPC는 설치된 안전망으로
-            # 연결만 해 두고, YouTube가 실제로 PO Token을 요구할 때만 사용된다.
+            # Stage03: explicit development-only BgUtils HTTP integration.
+            # It is not installed or started at RR-V startup. When unavailable,
+            # the existing WPC-only command is preserved without an extra retry.
+            bgutil = None
+            if os.environ.get("RRV_BGUTIL_STAGE03_HOME"):
+                from services.bgutil_http_service import connect_bgutil_http
+
+                bgutil = connect_bgutil_http(deno)
+
+            plugin_dirs: list[Path] = []
+            if bgutil is not None:
+                plugin_dirs.append(bgutil.plugin_dir)
             if wpc_provider_runtime_ready():
-                command.extend(["--no-plugin-dirs", "--plugin-dirs", str(RRV_WPC_PROVIDER_DIR)])
+                plugin_dirs.append(RRV_WPC_PROVIDER_DIR)
+
+            if plugin_dirs:
+                command.append("--no-plugin-dirs")
+                for plugin_dir in plugin_dirs:
+                    command.extend(["--plugin-dirs", str(plugin_dir)])
+            if bgutil is not None:
+                command.extend([
+                    "--extractor-args",
+                    f"youtubepot-bgutilhttp:base_url={bgutil.base_url}",
+                ])
 
             # RR-V 전용 로그인 파일은 원본을 보존하고 작업용 복사본만 yt-dlp에
             # 전달한다. yt-dlp가 쿠키를 갱신/삭제해도 다음 작업은 저장된 원본에서
