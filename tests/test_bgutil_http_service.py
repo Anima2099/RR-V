@@ -98,7 +98,7 @@ class BgutilHTTPTests(unittest.TestCase):
             conn = server.ensure(self.root, self.deno)
             self.assertIsNotNone(conn)
             self.assertEqual(conn.base_url, "http://127.0.0.1:12024")
-            self.assertEqual(conn.plugin_dir, self.root / "plugins")
+            self.assertTrue(conn.plugin_dir.samefile(self.root / "plugins"))
             self.assertEqual(server.ensure(self.root, self.deno), conn)
             self.assertEqual(popen.call_count, 1)
             self.assertEqual(popen.call_args[0][0][-4:], ["--host", "127.0.0.1", "--port", "12024"])
