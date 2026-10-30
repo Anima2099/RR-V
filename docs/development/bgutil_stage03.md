@@ -102,6 +102,60 @@ BgUtils-only isolated test with the subsequent WPC fallback smoke.
 
 Never share raw verbose logs without redacting tokens or session content.
 
+### Safe Stage03 diagnostic log (when real RR-V only registers WPC)
+
+The developer build now writes a dedicated **privacy-minimal** log:
+
+```text
+%APPDATA%\\RR-V\\logs\\bgutil-stage03.log
+```
+
+The file contains short status codes, process IDs and timestamps only, without
+video URLs, titles, cookie files, raw exceptions, command lines or PO Tokens.
+Upload **this file first**, rather than the downloads' verbose task logs.
+It also records successful **analysis** and **download** provider selections,
+so users need not paste complex PowerShell log-parsing commands.
+
+Relevant event names:
+
+| Event | What it shows |
+| --- | --- |
+| `app.launched` | Whether the newly launched Python/EXE process inherited the opt-in setting |
+| `app.primary` | Which process actually became RR-V's main instance |
+| `app.forwarded` | A second launch forwarded to an already running primary |
+| `bgutil.connection` | Whether the standalone Deno server became ready, or a safe failure status |
+| `youtube.providers` | Provider selection per **analysis** or **download**, including WPC-only fallback |
+| `bgutil.stopped` / `app.closed` | Normal server / application shutdown |
+
+Example of a successful integration:
+
+```text
+event=app.launched | pid=123 | mode=enabled | runtime=source
+event=app.primary | pid=123 | mode=enabled
+event=bgutil.connection | pid=123 | result=ready | status=ready | server_pid=456
+event=youtube.providers | pid=123 | stage=analysis | mode=enabled | deno=found | bgutil=ready | wpc=available | route=bgutil-and-wpc
+event=youtube.providers | pid=123 | stage=download | mode=enabled | deno=found | bgutil=ready | wpc=available | route=bgutil-and-wpc
+```
+
+Example of an unsuccessful integration:
+
+```text
+event=bgutil.connection | pid=123 | result=fallback | status=server-ping-timeout | server_pid=0
+event=youtube.providers | pid=123 | stage=analysis | mode=enabled | deno=found | bgutil=server-ping-timeout | wpc=available | route=wpc-only
+```
+
+This diagnostic log records which providers **were attached to yt-dlp**.
+It does not by itself prove which provider minted an actual token or that a
+particular download succeeded. Output is rotated to `bgutil-stage03.log.1`
+when the active file grows beyond 512 KiB.
+
+To collect a clean test: fully exit RR-V (including tray), launch the developer
+build from the terminal with `RRV_BGUTIL_STAGE03_HOME` set, analyze and download
+one public YouTube video, then attach `bgutil-stage03.log`. There is no need to
+reinstall BgUtils, repeat the anonymous standalone probe or run a separate
+process-list command. If the log is missing after this, report that result
+rather than attaching unrelated unredacted logs.
+
 5. Run the actual developer build in the **same terminal**:
 
 ~~~powershell

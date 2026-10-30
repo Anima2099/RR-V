@@ -22,6 +22,8 @@ from urllib.error import URLError
 from urllib.request import ProxyHandler, Request, build_opener
 import zipfile
 
+from app.bgutil_diagnostics import record_bgutil_diagnostic
+
 
 ENV_HOME = "RRV_BGUTIL_STAGE03_HOME"
 PROVIDER_VERSION = "2.0.2"
@@ -110,6 +112,19 @@ class _BgUtilServer:
     def record_status(self, status: str) -> None:
         with self._lock:
             self._status = status
+
+    def process_pid(self) -> int:
+        """Return a server PID, not the server command line or credentials."""
+        with self._lock:
+            process = self._process
+            if process is None:
+                return 0
+            try:
+                if process.poll() is None:
+                    return int(getattr(process, "pid", 0) or 0)
+            except (OSError, ValueError, TypeError):
+                pass
+            return 0
 
     def ensure(self, home: Path, deno: Path) -> BgUtilConnection | None:
         with self._lock:
@@ -228,12 +243,28 @@ def connect_bgutil_http(deno: Path | None) -> BgUtilConnection | None:
         return None
     if deno is None:
         _SERVER.record_status("deno-executable-missing")
+        record_bgutil_diagnostic(
+            "bgutil.connection",
+            pid=os.getpid(),
+            result="fallback",
+            status=_SERVER.status(),
+            server_pid=0,
+        )
         return None
     try:
-        return _SERVER.ensure(Path(raw_home).expanduser(), deno)
+        connection = _SERVER.ensure(Path(raw_home).expanduser(), deno)
     except (OSError, ValueError) as error:
         _SERVER.record_status(f"connection-setup-failed:{type(error).__name__}")
-        return None
+        connection = None
+
+    record_bgutil_diagnostic(
+        "bgutil.connection",
+        pid=os.getpid(),
+        result="ready" if connection is not None else "fallback",
+        status=_SERVER.status(),
+        server_pid=_SERVER.process_pid(),
+    )
+    return connection
 
 
 def bgutil_http_status() -> str:
@@ -244,7 +275,15 @@ def bgutil_http_status() -> str:
 
 
 def shutdown_bgutil_http() -> None:
+    server_pid = _SERVER.process_pid()
     _SERVER.close()
+    if server_pid:
+        record_bgutil_diagnostic(
+            "bgutil.stopped",
+            pid=os.getpid(),
+            server_pid=server_pid,
+            status="stopped",
+        )
 
 
 atexit.register(shutdown_bgutil_http)

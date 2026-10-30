@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from app.bgutil_diagnostics import record_bgutil_diagnostic
 from app.download_log import create_task_log_path, write_download_event
 from app.general_preferences import load_general_preferences
 from app.paths import (
@@ -398,16 +399,25 @@ class YtDlpService:
             # Stage03: explicit development-only BgUtils HTTP integration.
             # It is not installed or started at RR-V startup. When unavailable,
             # the existing WPC-only command is preserved without an extra retry.
+            bgutil_enabled = bool(
+                os.environ.get("RRV_BGUTIL_STAGE03_HOME", "").strip()
+            )
             bgutil = None
-            if os.environ.get("RRV_BGUTIL_STAGE03_HOME"):
-                from services.bgutil_http_service import connect_bgutil_http
+            bgutil_status = "disabled"
+            if bgutil_enabled:
+                from services.bgutil_http_service import (
+                    bgutil_http_status,
+                    connect_bgutil_http,
+                )
 
                 bgutil = connect_bgutil_http(deno)
+                bgutil_status = bgutil_http_status()
 
             plugin_dirs: list[Path] = []
             if bgutil is not None:
                 plugin_dirs.append(bgutil.plugin_dir)
-            if wpc_provider_runtime_ready():
+            wpc_available = wpc_provider_runtime_ready()
+            if wpc_available:
                 plugin_dirs.append(RRV_WPC_PROVIDER_DIR)
 
             if plugin_dirs:
@@ -419,6 +429,27 @@ class YtDlpService:
                     "--extractor-args",
                     f"youtubepot-bgutilhttp:base_url={bgutil.base_url}",
                 ])
+
+            # Both successful analysis and downloads record this decision.
+            # Never log URL, title, cookies, PO Tokens or the server port.
+            stage = (
+                "analysis" if "--dump-single-json" in command
+                else "download" if "--progress" in command else "other"
+            )
+            if bgutil is not None:
+                route = "bgutil-and-wpc" if wpc_available else "bgutil-only"
+            else:
+                route = "wpc-only" if wpc_available else "none"
+            record_bgutil_diagnostic(
+                "youtube.providers",
+                pid=os.getpid(),
+                stage=stage,
+                mode="enabled" if bgutil_enabled else "disabled",
+                deno="found" if deno is not None else "missing",
+                bgutil=bgutil_status,
+                wpc="available" if wpc_available else "missing",
+                route=route,
+            )
 
             # RR-V 전용 로그인 파일은 원본을 보존하고 작업용 복사본만 yt-dlp에
             # 전달한다. yt-dlp가 쿠키를 갱신/삭제해도 다음 작업은 저장된 원본에서

@@ -17,6 +17,7 @@ if is_native_messaging_invocation(sys.argv[1:]):
 from PySide6.QtCore import QTimer
 
 from app.application import create_application
+from app.bgutil_diagnostics import record_bgutil_diagnostic
 from app.general_preferences import load_general_preferences
 from services.cookie_work_file import cleanup_stale_cookie_work_directories
 from services.external_url_service import ExternalUrlService, extract_external_urls
@@ -47,6 +48,16 @@ def _safe_console_print(text: str) -> None:
 def main() -> int:
     _prepare_windowed_stdio()
     app = create_application(sys.argv)
+    bgutil_mode = (
+        "enabled" if os.environ.get("RRV_BGUTIL_STAGE03_HOME", "").strip()
+        else "disabled"
+    )
+    record_bgutil_diagnostic(
+        "app.launched",
+        pid=os.getpid(),
+        mode=bgutil_mode,
+        runtime="frozen" if getattr(sys, "frozen", False) else "source",
+    )
     command_arguments = sys.argv[1:]
     startup_hidden_requested = "--startup-hidden" in command_arguments
     browser_extension_requested = "--browser-extension" in command_arguments
@@ -66,6 +77,9 @@ def main() -> int:
             activate=activate_existing,
             source=external_source,
         ):
+            record_bgutil_diagnostic(
+                "app.forwarded", pid=os.getpid(), mode=bgutil_mode,
+            )
             return 0
 
         # 비정상 종료로 잠금만 남은 경우에 한해 한 번 복구한다.
@@ -75,6 +89,9 @@ def main() -> int:
                 activate=activate_existing,
                 source=external_source,
             ):
+                record_bgutil_diagnostic(
+                    "app.forwarded", pid=os.getpid(), mode=bgutil_mode,
+                )
                 return 0
             show_warm_message(
                 None,
@@ -83,6 +100,8 @@ def main() -> int:
                 "잠시 후 다시 실행해 주세요.",
             )
             return 1
+
+    record_bgutil_diagnostic("app.primary", pid=os.getpid(), mode=bgutil_mode)
 
     # 두 번째 실행 프로세스가 아니라 실제 primary RR-V가 된 뒤에만 이전
     # 비정상 종료에서 남은 임시 인증 파일을 정리한다. 실행 중인 primary의
@@ -140,6 +159,7 @@ def main() -> int:
     try:
         return app.exec()
     finally:
+        record_bgutil_diagnostic("app.closed", pid=os.getpid(), mode=bgutil_mode)
         external_service.close()
 
 
