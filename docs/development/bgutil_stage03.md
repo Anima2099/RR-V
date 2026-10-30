@@ -176,6 +176,72 @@ Remove-Item Env:RRV_BGUTIL_STAGE03_HOME -ErrorAction SilentlyContinue
 
 Then run the developer build again. No source code change or cleanup is needed.
 
+## Token issuance and controlled fallback verification
+
+The previous diagnostic log confirms *provider registration* and Deno server
+reuse, not successful token minting. Run this separate, opt-in validation from a
+VS Code PowerShell terminal. **Fully exit RR-V** first so this independent
+diagnostic doesn't conflict with its local server or an old instance.
+
+1. Enable the existing, independently prepared provider (no installation needed):
+
+~~~powershell
+$env:RRV_BGUTIL_STAGE03_HOME = "$env:LOCALAPPDATA\RR-V\bgutil-stage03-external"
+~~~
+
+2. Confirm BgUtils can issue a PO Token to yt-dlp, with **WPC excluded**:
+
+~~~powershell
+.\.venv\Scripts\python.exe .\tests\manual\bgutil_token_fallback_probe.py
+~~~
+
+Expected on a successful public test video:
+
+~~~text
+Stage03 mode: bgutil
+Token issuance: CONFIRMED
+Status: bgutil-token-confirmed
+BgUtils registered: True
+WPC registered: False
+BgUtils response observed: True
+WPC response observed: False
+Video simulation exit code: 0
+~~~
+
+A request attempt or normal video simulation exit alone is not treated as
+proof. The verifier requires yt-dlp's **provider-returned token response**
+marker with PO Token tracing explicitly enabled, WPC not registered, and a
+successful simulated video request. The trace **can contain sensitive raw PO
+Tokens**, so the entire yt-dlp stdout/stderr is captured in memory, scanned for
+known markers, and **never printed or saved**. The verifier writes *only
+categorical status codes* to the existing privacy-minimal
+`%APPDATA%\RR-V\logs\bgutil-stage03.log`. If the video requires login or does
+not request tokens, provide another accessible public video using the
+`--video "https://www.youtube.com/watch?v=..."` option.
+
+3. **Only after BgUtils succeeds**, explicitly test HTTP failure handling and
+   the WPC fallback using a dedicated, guaranteed-unlistening localhost port:
+
+~~~powershell
+.\.venv\Scripts\python.exe .\tests\manual\bgutil_token_fallback_probe.py --mode fallback
+~~~
+
+This runs a *separate simulation*, never rewrites the installed provider and
+does not intentionally corrupt or stop the real Deno server. It registers both
+providers, but directs BgUtils HTTP at an unavailable loopback port so yt-dlp
+can attempt the lower-priority WPC provider. **Chrome may open as part of this
+intentional fallback test**. Do not run this step in routine browser-free
+verification.
+
+Successful fallback proof requires a returned WPC token-response marker, not
+merely the appearance of Chrome. Expected result:
+`Status: wpc-token-confirmed`. If token generation is not required or WPC
+fails, the script reports `NOT CONFIRMED` instead of a false PASS.
+
+Record both results separately. This verifies token provider integration in
+yt-dlp simulated extraction, not an actual file download or the user-facing
+application's handling of every possible YouTube error.
+
 ## Stage04 / release gate
 
 - The experimental setup script is NOT a public automatic component installer.
