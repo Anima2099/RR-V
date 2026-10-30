@@ -98,7 +98,9 @@ class BgutilHTTPTests(unittest.TestCase):
             conn = server.ensure(self.root, self.deno)
             self.assertIsNotNone(conn)
             self.assertEqual(conn.base_url, "http://127.0.0.1:12024")
-            self.assertTrue(conn.plugin_dir.samefile(self.root / "plugins"))
+            self.assertTrue(conn.plugin_dir.samefile(self.root))
+            self.assertTrue((conn.plugin_dir / "plugin.zip").is_file())
+            self.assertEqual(server.status(), "ready")
             self.assertEqual(server.ensure(self.root, self.deno), conn)
             self.assertEqual(popen.call_count, 1)
             self.assertEqual(popen.call_args[0][0][-4:], ["--host", "127.0.0.1", "--port", "12024"])
@@ -116,6 +118,7 @@ class BgutilHTTPTests(unittest.TestCase):
             self.assertIsNone(server.ensure(self.root, self.deno))
             self.assertIsNone(server.ensure(self.root, self.deno))
             self.assertEqual(popen.call_count, 1)
+            self.assertEqual(server.status(), "retry-cooldown")
             server.close()
 
     def test_subprocess_launch_error_is_nonfatal(self):
@@ -123,10 +126,35 @@ class BgutilHTTPTests(unittest.TestCase):
         with (patch.object(bgutil, "_free_loopback_port", return_value=12024),
               patch.object(bgutil.subprocess, "Popen", side_effect=OSError("no launch"))):
             self.assertIsNone(server.ensure(self.root, self.deno))
+            self.assertEqual(server.status(), "deno-launch-failed:OSError")
             server.close()
 
+    def test_invalid_external_installation_has_diagnostic(self):
+        server = bgutil._BgUtilServer()
+        (self.root / "rrv-stage03.json").unlink()
+        self.assertIsNone(server.ensure(self.root, self.deno))
+        self.assertEqual(server.status(), "invalid-external-installation")
+
+    def test_missing_deno_has_diagnostic(self):
+        server = bgutil._BgUtilServer()
+        self.assertIsNone(server.ensure(self.root, self.root / "missing-deno.exe"))
+        self.assertEqual(server.status(), "deno-executable-missing")
+
+    def test_exited_server_reports_exit_code(self):
+        server = bgutil._BgUtilServer()
+        fake = FakeProcess()
+        fake._poll = 27
+        with (patch.object(bgutil, "_free_loopback_port", return_value=12024),
+              patch.object(bgutil.subprocess, "Popen", return_value=fake)):
+            self.assertIsNone(server.ensure(self.root, self.deno))
+        self.assertEqual(server.status(), "deno-exited-before-ready:code=27")
+
+    def test_status_does_not_leak_when_disabled(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(bgutil.bgutil_http_status(), "disabled")
+
     def test_explicit_env_connects_and_shutdown_is_idempotent(self):
-        connection = bgutil.BgUtilConnection(self.root / "plugins", "http://127.0.0.1:9999")
+        connection = bgutil.BgUtilConnection(self.root, "http://127.0.0.1:9999")
         with (patch.dict(os.environ, {bgutil.ENV_HOME: str(self.root)}),
               patch.object(bgutil._SERVER, "ensure", return_value=connection) as ensure):
             self.assertEqual(bgutil.connect_bgutil_http(self.deno), connection)

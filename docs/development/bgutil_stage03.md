@@ -22,11 +22,19 @@
   start Deno HTTP server **lazily on the first YouTube job**, not on RR-V startup.
 - Deno server binds **only** 127.0.0.1, on an ephemeral port, and is reused
   during the same RR-V process. It is terminated on app shutdown or Python exit.
-- Both plugins are supplied to yt-dlp using `--plugin-dirs`: external BgUtils
-  first, existing WPC second. Official provider preference values are
+- `--plugin-dirs` points at the **external installation root**, which contains
+  `plugin.zip` and the unpacked `plugins/yt_dlp_plugins/` package. yt-dlp scans
+  immediate children of the given directory; pointing at `plugins/` itself
+  prevents the provider from being discovered.
+- In the normal opted-in RR-V application, both providers are registered:
+  BgUtils HTTP first and WPC second. Official provider preference values are
   BgUtils HTTP 130 and WPC -100. No separate download retry is added.
 - If the external files are absent or server initialization fails, attach only
   WPC. A 60-second cooldown prevents rapid retry loops on server failures.
+  The separate diagnostic probe reports sanitized server states such as
+  `invalid-external-installation`, `deno-executable-missing`,
+  `deno-exited-before-ready:code=1`, or `server-ping-timeout`, without printing
+  raw server output that might contain token values.
 - If the server fails **during an active download**, yt-dlp's provider selection
   may fall back to WPC. That specific behavior must be verified in a real
   Windows smoke test and must not be represented as guaranteed yet.
@@ -44,16 +52,17 @@ In GitHub Desktop, select `develop/1.6.0`, Fetch and Pull origin. Open VS Code.
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ~~~
 
-2. Prepare the separate external GPL provider in LocalAppData:
+2. Prepare the separate external GPL provider in LocalAppData **only if the
+   Stage03 setup has not already passed on this PC**:
 
 ~~~powershell
 powershell -ExecutionPolicy Bypass -File .\tests\manual\prepare_bgutil_stage03.ps1
 ~~~
 
-This prepares the pinned upstream source, checks official plugin SHA-256 and
-installs Deno dependencies into `%LOCALAPPDATA%\RR-V\bgutil-stage03-external`.
-It does not modify RR-V's WPC installation. To deliberately replace an existing
-external stage03 folder, close RR-V and rerun with `-Force`.
+If `STAGE 03 SETUP RESULT: PASS` already appeared earlier, **do not rerun the
+installer**. This fix reuses the existing pinned files in
+`%LOCALAPPDATA%\RR-V\bgutil-stage03-external` without any redownload or
+reinstallation. WPC remains unchanged.
 
 3. Enable only in this VS Code terminal session:
 
@@ -61,20 +70,37 @@ external stage03 folder, close RR-V and rerun with `-Force`.
 $env:RRV_BGUTIL_STAGE03_HOME = "$env:LOCALAPPDATA\RR-V\bgutil-stage03-external"
 ~~~
 
-4. Verify yt-dlp detects the HTTP provider and WPC using a public video. This
-   is a **simulation**, not a full download, and never uses saved RR-V cookies:
+4. **BgUtils-only** registration probe, with WPC/Chrome and RR-V cookies
+   explicitly disabled. This is a simulation, not a full download:
 
 ~~~powershell
 .\.venv\Scripts\python.exe .\tests\manual\bgutil_stage03_probe.py
 ~~~
 
 If the video is unavailable, supply a known-working public YouTube URL as the
-first argument, e.g. `...\bgutil_stage03_probe.py "https://youtube.com/watch?v=..."`.
-Look for `BgUtils HTTP registered: True` and `WPC registered: True`.
-Provider **registration** is not equivalent to token **minting**. If the
-simulation never requests a PO Token, use an appropriate accessible video for
-additional smoke tests. Never share raw verbose logs without checking for
-account/session/token content.
+first argument. Expect the following output:
+
+~~~text
+BgUtils server status: ready
+BgUtils HTTP registered: True
+WPC registered (must be False): False
+Plugin import error: False
+STAGE 03 PROBE: BGUTIL-ONLY REGISTRATION PASS
+~~~
+
+The probe does not include any WPC plugin directory and fails rather than
+starting yt-dlp if the standalone server is unavailable. **No Chrome window
+should open during this test.** If it does, stop and report the anomaly.
+`BgUtils token request attempted: False` means no request was observed, not
+that the token provider was incapable of minting. Earlier Stage02 successfully
+generated a token directly; YouTube demand and yt-dlp integration still need
+validation separately.
+
+The real RR-V application will still register WPC as a fallback when enabled;
+WPC can launch Chrome when it is genuinely selected. Do not conflate the
+BgUtils-only isolated test with the subsequent WPC fallback smoke.
+
+Never share raw verbose logs without redacting tokens or session content.
 
 5. Run the actual developer build in the **same terminal**:
 

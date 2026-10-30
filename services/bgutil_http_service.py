@@ -100,29 +100,45 @@ class _BgUtilServer:
         self._url = ""
         self._failed_until = 0.0
         self._verified_home: Path | None = None
+        # Diagnostic states contain no cookies, tokens or personal filesystem paths.
+        self._status = "not-started"
+
+    def status(self) -> str:
+        with self._lock:
+            return self._status
+
+    def record_status(self, status: str) -> None:
+        with self._lock:
+            self._status = status
 
     def ensure(self, home: Path, deno: Path) -> BgUtilConnection | None:
         with self._lock:
             home = home.resolve()
             deno = deno.resolve()
             if not deno.is_file():
+                self._status = "deno-executable-missing"
                 return None
             if self._home != home or self._deno != deno:
                 self._stop_locked()
                 self._failed_until = 0.0
                 self._verified_home = None
+                self._status = "starting"
                 self._home, self._deno = home, deno
             if self._verified_home != home:
                 if not _validate_external_home(home):
+                    self._status = "invalid-external-installation"
                     return None
                 self._verified_home = home
 
             if self._process is not None:
                 if self._process.poll() is None and _ping_local_provider(self._url):
-                    return BgUtilConnection(home / "plugins", self._url)
+                    self._status = "ready"
+                    return BgUtilConnection(home, self._url)
+                self._status = "server-stopped-or-not-responding"
                 self._stop_locked()
 
             if time.monotonic() < self._failed_until:
+                self._status = "retry-cooldown"
                 return None
 
             port = _free_loopback_port()
@@ -150,7 +166,8 @@ class _BgUtilServer:
                     stderr=subprocess.DEVNULL,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
                 )
-            except OSError:
+            except OSError as error:
+                self._status = f"deno-launch-failed:{type(error).__name__}"
                 self._failed_until = time.monotonic() + _RETRY_DELAY
                 return None
 
@@ -161,8 +178,18 @@ class _BgUtilServer:
                 if process.poll() is not None:
                     break
                 if _ping_local_provider(url):
-                    return BgUtilConnection(home / "plugins", url)
+                    self._status = "ready"
+                    # yt-dlp --plugin-dirs scans immediate children of this
+                    # directory, including the verified plugin.zip archive.
+                    # Passing home/plugins would scan inside yt_dlp_plugins and
+                    # hide the provider namespace from the plugin loader.
+                    return BgUtilConnection(home, url)
                 time.sleep(0.2)
+            exit_code = process.poll()
+            self._status = (
+                f"deno-exited-before-ready:code={exit_code}"
+                if exit_code is not None else "server-ping-timeout"
+            )
             self._stop_locked()
             self._failed_until = time.monotonic() + _RETRY_DELAY
             return None
@@ -187,6 +214,7 @@ class _BgUtilServer:
         with self._lock:
             self._stop_locked()
             self._home = self._deno = None
+            self._status = "stopped"
             self._failed_until = 0.0
 
 
@@ -196,12 +224,23 @@ _SERVER = _BgUtilServer()
 def connect_bgutil_http(deno: Path | None) -> BgUtilConnection | None:
     """Explicit opt-in only. Failure never blocks the existing WPC provider."""
     raw_home = os.environ.get(ENV_HOME, "").strip()
-    if not raw_home or deno is None:
+    if not raw_home:
+        return None
+    if deno is None:
+        _SERVER.record_status("deno-executable-missing")
         return None
     try:
         return _SERVER.ensure(Path(raw_home).expanduser(), deno)
-    except (OSError, ValueError):
+    except (OSError, ValueError) as error:
+        _SERVER.record_status(f"connection-setup-failed:{type(error).__name__}")
         return None
+
+
+def bgutil_http_status() -> str:
+    """Return a safe, short reason for the most recent connection decision."""
+    if not os.environ.get(ENV_HOME, "").strip():
+        return "disabled"
+    return _SERVER.status()
 
 
 def shutdown_bgutil_http() -> None:
