@@ -47,6 +47,7 @@ required_files = [
     VERSION_FILE,
     WPC_RUNTIME_DIR / "yt_dlp_plugins" / "extractor" / "getpot_wpc.py",
     WPC_RUNTIME_DIR / "nodriver" / "__init__.py",
+    WPC_RUNTIME_DIR / "nodriver" / "cdp" / "network.py",
     WPC_LOCK_FILE,
 ]
 required_files.extend(WPC_RUNTIME_DIR / name / "METADATA" for name in LOCKED_WPC_DIST_INFO)
@@ -79,6 +80,17 @@ if actual_dist_info != expected_dist_info:
         f"Expected: {sorted(expected_dist_info)}\n"
         f"Actual: {sorted(actual_dist_info)}"
     )
+
+# Prevent publishing a package with malformed vendored WPC/nodriver Python.
+# In particular, nodriver 0.50.3 can ship a non-UTF-8 byte in network.py.
+for wpc_source in sorted(WPC_RUNTIME_DIR.rglob("*.py")):
+    try:
+        compile(wpc_source.read_text(encoding="utf-8-sig"), str(wpc_source), "exec")
+    except (OSError, UnicodeError, SyntaxError) as error:
+        raise SystemExit(
+            f"Invalid WPC Python source: {wpc_source}: {error}. "
+            "Run PREP_WPC_PROVIDER.ps1 again."
+        ) from error
 
 wpc_cache_files = list(WPC_RUNTIME_DIR.rglob("*.pyc"))
 wpc_cache_dirs = [path for path in WPC_RUNTIME_DIR.rglob("__pycache__") if path.is_dir()]

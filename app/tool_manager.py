@@ -27,6 +27,7 @@ from app.paths import (
     wpc_provider_runtime_ready,
     restore_bundled_tools,
 )
+from app.wpc_runtime_validation import wpc_critical_sources_valid
 from app.tool_sources import (
     FFMPEG_RELEASE_SHA256_URL,
     FFMPEG_RELEASE_VERSION_URL,
@@ -158,6 +159,9 @@ def _managed_tree_matches(source_root: Path, installed_root: Path) -> bool:
 
 def _wpc_integrity_ready() -> bool:
     if not wpc_provider_runtime_ready():
+        return False
+    # SHA-256 equivalence does not guarantee a Python source can be parsed.
+    if not wpc_critical_sources_valid(RRV_WPC_RUNTIME_DIR):
         return False
     # 개발 환경에서 번들 기준 파일이 없는 경우에는 기존의 빠른 런타임 확인을
     # 유지한다. 최종 패키지에서는 번들 런타임과 SHA-256까지 비교한다.

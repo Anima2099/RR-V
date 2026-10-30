@@ -6,6 +6,8 @@ import sys
 import time
 from pathlib import Path
 
+from app.wpc_runtime_validation import wpc_critical_sources_valid
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RESOURCES_DIR = PROJECT_ROOT / "resources"
@@ -23,6 +25,9 @@ BUNDLED_BROWSER_EXTENSION_DIR = (
 )
 _BROWSER_EXTENSION_FILES = ("manifest.json", "background.js", "RR-V.png", "README.txt")
 WPC_PROVIDER_VERSION = "1.1.2"
+# Increment this build marker when the vendored runtime is repaired without
+# changing the pinned upstream WPC plugin version.
+WPC_RUNTIME_BUILD_ID = "1.1.2-rrv1"
 WARM_SAGE_THEME_PATH = THEMES_DIR / "warm_sage.qss"
 
 APPDATA_DIR = Path(os.environ.get("APPDATA", Path.home()))
@@ -419,38 +424,41 @@ def bootstrap_runtime_wpc_provider() -> bool:
 
     RRV_WPC_PROVIDER_DIR.mkdir(parents=True, exist_ok=True)
     try:
-        current_version = _WPC_PROVIDER_MARKER.read_text(encoding="utf-8").strip()
+        current_version = _WPC_PROVIDER_MARKER.read_text(encoding="utf-8").lstrip("\ufeff").strip()
     except OSError:
         current_version = ""
 
-    needs_refresh = current_version != WPC_PROVIDER_VERSION or not wpc_provider_runtime_ready()
+    needs_refresh = current_version != WPC_RUNTIME_BUILD_ID or not wpc_provider_runtime_ready()
     if not needs_refresh:
         return True
+    # Only verify bundled syntax when installing/replacing, not on warm starts.
+    if not wpc_critical_sources_valid(BUNDLED_WPC_RUNTIME_DIR):
+        return False
 
     try:
         if RRV_WPC_RUNTIME_DIR.exists():
             shutil.rmtree(RRV_WPC_RUNTIME_DIR)
         shutil.copytree(BUNDLED_WPC_RUNTIME_DIR, RRV_WPC_RUNTIME_DIR)
-        _WPC_PROVIDER_MARKER.write_text(WPC_PROVIDER_VERSION + "\n", encoding="utf-8")
+        _WPC_PROVIDER_MARKER.write_text(WPC_RUNTIME_BUILD_ID + "\n", encoding="utf-8")
     except OSError:
         return False
-    return wpc_provider_runtime_ready()
+    return wpc_provider_runtime_ready() and wpc_critical_sources_valid(RRV_WPC_RUNTIME_DIR)
 
 
 def restore_bundled_wpc_provider() -> bool:
     """패키지에 포함된 WPC Provider 런타임으로 복구한다."""
 
-    if not has_bundled_wpc_provider():
+    if not has_bundled_wpc_provider() or not wpc_critical_sources_valid(BUNDLED_WPC_RUNTIME_DIR):
         return False
     RRV_WPC_PROVIDER_DIR.mkdir(parents=True, exist_ok=True)
     try:
         if RRV_WPC_RUNTIME_DIR.exists():
             shutil.rmtree(RRV_WPC_RUNTIME_DIR)
         shutil.copytree(BUNDLED_WPC_RUNTIME_DIR, RRV_WPC_RUNTIME_DIR)
-        _WPC_PROVIDER_MARKER.write_text(WPC_PROVIDER_VERSION + "\n", encoding="utf-8")
+        _WPC_PROVIDER_MARKER.write_text(WPC_RUNTIME_BUILD_ID + "\n", encoding="utf-8")
     except OSError:
         return False
-    return wpc_provider_runtime_ready()
+    return wpc_provider_runtime_ready() and wpc_critical_sources_valid(RRV_WPC_RUNTIME_DIR)
 
 def restore_bundled_tools() -> tuple[str, ...]:
     """배포본에 포함된 기본 도구가 있으면 현재 도구를 그 버전으로 복구한다."""

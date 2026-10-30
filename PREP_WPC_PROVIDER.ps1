@@ -4,6 +4,8 @@ $ErrorActionPreference = "Stop"
 
 $Root = $PSScriptRoot
 $Version = "1.1.2"
+$RuntimeBuildId = "$Version-rrv1"
+$SourceValidator = Join-Path $Root "app\wpc_runtime_validation.py"
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
 $Resources = Join-Path $Root "resources"
 $ProviderDir = Join-Path $Resources "wpc-provider"
@@ -36,6 +38,9 @@ if (-not (Test-Path $Python)) {
 }
 if (-not (Test-Path $LockFile)) {
     throw "resources\wpc-provider\WPC_RUNTIME_LOCK.txt is missing."
+}
+if (-not (Test-Path $SourceValidator)) {
+    throw "app\wpc_runtime_validation.py is missing."
 }
 
 $LockedPackages = @(
@@ -116,6 +121,11 @@ if ($PluginText -notmatch '_RRV_WPC_RUNTIME') {
     Set-Content -Path $Plugin -Value $PluginText -Encoding utf8
 }
 
+& $Python $SourceValidator $RuntimeDir --repair
+if ($LASTEXITCODE -ne 0) {
+    throw "WPC Python source validation failed; refusing to package a broken provider."
+}
+
 # Release resources must not contain Python bytecode/cache files.
 Get-ChildItem -Path $RuntimeDir -Directory -Recurse -Filter __pycache__ -ErrorAction SilentlyContinue |
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
@@ -129,7 +139,17 @@ if (Test-Path $RuntimeDest) {
     Remove-Item $RuntimeDest -Recurse -Force
 }
 Copy-Item $RuntimeDir $RuntimeDest -Recurse -Force
-Set-Content -Path $MarkerDest -Value $Version -Encoding utf8
+& $Python $SourceValidator $RuntimeDest
+if ($LASTEXITCODE -ne 0) {
+    throw "Installed WPC Python source validation failed."
+}
+# Windows PowerShell 5.1 Set-Content -Encoding utf8 writes a BOM that can
+# invalidate this marker every startup, forcing repeated runtime copies.
+[System.IO.File]::WriteAllText(
+    $MarkerDest,
+    $RuntimeBuildId + "`n",
+    [System.Text.UTF8Encoding]::new($false)
+)
 
 Write-Host "[4/4] Checking prepared files..."
 $RuntimePlugin = Join-Path $RuntimeDest "yt_dlp_plugins\extractor\getpot_wpc.py"

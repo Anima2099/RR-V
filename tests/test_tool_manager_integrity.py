@@ -8,6 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from app.wpc_runtime_validation import repair_nodriver_network_encoding
+
 import app.tool_manager as tool_manager
 
 
@@ -73,6 +75,27 @@ class ToolManagerIntegrityTests(unittest.TestCase):
             (cache / "module.pyc").write_bytes(b"generated")
 
             self.assertTrue(tool_manager._managed_tree_matches(source, installed))
+
+    def test_wpc_integrity_rejects_corrupt_nodriver_even_if_files_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            plugin = root / "yt_dlp_plugins" / "extractor" / "getpot_wpc.py"
+            plugin.parent.mkdir(parents=True)
+            plugin.write_text("VALUE = 1\n", encoding="utf-8")
+            nodriver = root / "nodriver" / "__init__.py"
+            nodriver.parent.mkdir(parents=True)
+            nodriver.write_text("VALUE = 1\n", encoding="utf-8")
+            network = root / "nodriver" / "cdp" / "network.py"
+            network.parent.mkdir(parents=True)
+            network.write_bytes(b"# JSON (\xb1Inf)\n")
+            with (
+                patch.object(tool_manager, "RRV_WPC_RUNTIME_DIR", root),
+                patch.object(tool_manager, "BUNDLED_WPC_RUNTIME_DIR", root / "missing"),
+                patch.object(tool_manager, "wpc_provider_runtime_ready", return_value=True),
+            ):
+                self.assertFalse(tool_manager._wpc_integrity_ready())
+                self.assertEqual(repair_nodriver_network_encoding(root), 1)
+                self.assertTrue(tool_manager._wpc_integrity_ready())
 
     def test_ffmpeg_pair_mismatch_marks_both_unavailable(self) -> None:
         statuses = [
