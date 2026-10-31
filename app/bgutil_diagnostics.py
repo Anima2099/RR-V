@@ -22,6 +22,8 @@ _SAFE_ATOM = re.compile(r"[A-Za-z0-9_.:-]{1,72}\Z", re.ASCII)
 _ALLOWED_FIELDS = frozenset({
     "pid", "server_pid", "mode", "runtime", "stage", "deno", "server",
     "bgutil", "wpc", "route", "status", "result",
+    "scenario", "trial", "setup_ms", "extract_ms", "total_ms",
+    "token_source", "chrome_signal",
 })
 
 
