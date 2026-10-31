@@ -25,7 +25,7 @@ _ALLOWED_FIELDS = frozenset({
     "scenario", "trial", "setup_ms", "extract_ms", "total_ms",
     "token_source", "chrome_signal",
     "phase", "startup_ms", "ping_attempts", "output_kind", "first_output_ms",
-    "parent_pid", "order", "wall_ms",
+    "parent_pid", "order", "wall_ms", "launcher_pid",
 })
 
 

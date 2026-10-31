@@ -77,6 +77,40 @@ Optional: pass `--video "https://www.youtube.com/watch?v=..."` for another
 public, unauthenticated video. Use the SAME URL for both modes by running one
 script invocation, not separate manual commands.
 
+## Windows virtualenv process-identity fix
+
+The previous experiment incorrectly compared the process ID returned by
+`subprocess.Popen` with the Python interpreter's `os.getpid()`.
+On Windows, a virtual environment's `python.exe` may be a redirector that
+launches a second interpreter, so those IDs can differ **even when extraction
+and the BgUtils server both succeed**. That produced four false
+`worker-protocol-error` reports in the Windows smoke test.
+
+The new worker protocol uses an ephemeral random **correlation ID** passed in
+its private process environment, rather than demanding PID equality. Every
+worker first sends a small "hello" message identifying the actual interpreter
+PID, then sends a final fixed-field result. The parent validates the same
+correlation ID, actual PID, scenario, trial, and numerical fields in both
+messages, and rejects missing, duplicate or inconsistent protocol messages.
+Unrelated child output is **never printed or saved**, and the correlation ID
+is not logged. This value is an internal test identifier, not a YouTube PO
+Token, cookie or authentication credential.
+
+The summary now shows both `Worker` (actual Python PID) and `Launcher`
+(the process created by the parent). A mismatch between them is normal on
+some Windows systems. On timeout, the parent uses the validated actual
+worker PID to terminate the process tree, even if the launcher has already
+exited. Windows-specific process-tree cleanup is covered by mocked tests;
+a full Windows OS-level timeout test has **not** been performed. A failed
+worker still reports failure even if its launcher exits with code zero.
+
+On successful completion, there should be four rows with specific statuses
+and nonzero setup/extraction times (rather than
+`worker-protocol-error` with zero metrics). The two BgUtils rows should
+have a corresponding `bgutil.startup` record under the **worker** PID.
+If any run fails again, keep the diagnostics log for interpretation rather
+than retrying repeatedly.
+
 ## Interpreting the independent-process experiment
 
 In the normal four-worker run:
