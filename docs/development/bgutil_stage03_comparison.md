@@ -22,17 +22,25 @@ allows a controlled comparison without switching installed applications.
 - Runs a non-downloading simulation, not an actual file download.
 - Uses `--ignore-config`, `--no-cache-dir` and **no login cookies** for both
   modes. Consequently, it does not represent every authenticated user case.
-- Runs each mode twice, in alternating WPC/BgUtils/BgUtils/WPC order.
+- The **new recommended runner** launches one fresh Python worker per trial.
+  Group A is BgUtils → WPC; Group B is WPC → BgUtils. Four independent
+  interpreters are launched sequentially, so the server manager state is
+  never reused across different trials.
+- The previous shared-process tool (`bgutil_ab_compare.py`) is retained
+  for diagnostics, but is no longer the recommended smoke test.
 - Captures PO Token trace **in memory only**, classifies actual provider
   responses, and does not print or save raw tokens, credentials, stdout,
   stderr, video URLs, or user filesystem paths.
-- Measures provider setup (including first BgUtils server start), extraction,
-  and total elapsed times. Server startup on the first BgUtils request can
-  reasonably be slower than subsequent requests. The last WPC-only run may
-  occur while the BgUtils server is still alive; this is a diagnostic, not
-  a controlled benchmark of per-process resource consumption.
-- Records safe outcome codes and millisecond values in the already-existing
-  `%APPDATA%\RR-V\logs\bgutil-stage03.log`.
+- Measures provider setup (including cold Deno startup), simulated video
+  extraction and total time inside each worker, plus wall-clock time that
+  includes launching and closing the worker Python process. Both BgUtils
+  rows are cold-server cases, rather than one cold and one warm use.
+  This is a diagnostic of order/initialization sensitivity, not an
+  apples-to-apples production throughput benchmark.
+- Records safe outcome codes, group order, child process PID and
+  millisecond values in `%APPDATA%\RR-V\logs\bgutil-stage03.log`.
+  `compare.isolated` PID matches `bgutil.startup` PID if the worker
+  actually attempted Deno startup.
 - WPC **may open Chrome** if the video actually triggers a PO Token request;
   browser-window appearance must still be observed by the Windows tester.
 
@@ -52,20 +60,50 @@ allows a controlled comparison without switching installed applications.
    $env:RRV_BGUTIL_STAGE03_HOME = "$env:LOCALAPPDATA\RR-V\bgutil-stage03-external"
    ```
 
-4. Run ONE automated comparison:
+4. Run the **isolated opposite-order comparison** once. The command
+   starts four worker Python processes automatically:
 
    ```powershell
-   .\.venv\Scripts\python.exe .\tests\manual\bgutil_ab_compare.py
+   .\.venv\Scripts\python.exe .\tests\manual\bgutil_ab_isolated.py
    ```
 
 5. Copy/paste the comparison summary and attach only `bgutil-stage03.log`.
-   Mention whether a Chrome window appeared. If a run reports
-   `COMPARISON: NEEDS REVIEW`, do not retry repeatedly; share the safe status
-   and log so the actual failure can be diagnosed.
+   Mention whether a Chrome window appeared. All four trials run even if
+   an earlier one fails so both orders can be compared. If the output
+   reports `ISOLATED COMPARISON: NEEDS REVIEW`, do not keep retrying;
+   share the status and log for root-cause diagnosis.
 
 Optional: pass `--video "https://www.youtube.com/watch?v=..."` for another
 public, unauthenticated video. Use the SAME URL for both modes by running one
 script invocation, not separate manual commands.
+
+## Interpreting the independent-process experiment
+
+In the normal four-worker run:
+
+| Group | Worker order | What it isolates |
+| --- | --- | --- |
+| A (`bgutil-first`) | BgUtils 1, WPC 1 | Can a fresh BgUtils process start before any WPC trial? |
+| B (`wpc-first`) | WPC 2, BgUtils 2 | Does an immediately prior WPC *process* affect the next fresh BgUtils process? |
+
+The script runs both groups **sequentially**, not concurrently. Each worker
+uses the same video, yt-dlp executable and default YouTube client selection,
+and closes its own Deno server before the next worker runs. The child reports
+only a validated fixed-status JSON message, never raw yt-dlp output. The
+parent discards the child's unvalidated stdout/stderr and reports
+`worker-protocol-error` if the message cannot be authenticated by PID
+and the expected scenario/trial metadata.
+
+If both orders work but the old shared-process test still fails, shared
+Python state becomes a stronger hypothesis. This would not establish a
+root cause by itself. If BgUtils fails in both orders, investigate its
+cold-start/environment path. If only one order fails, inspect the safe
+startup phase records for the specific child PID. Remember that these are
+only two observations per provider.
+
+The earlier `bgutil_ab_compare.py` still exists as an optional
+shared-process control for further diagnosis; do not run it repeatedly
+unless the new isolated test establishes a reason.
 
 ## Deno cold-start diagnostics and bounded recovery
 
