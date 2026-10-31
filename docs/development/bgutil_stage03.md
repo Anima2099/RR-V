@@ -31,6 +31,10 @@
   BgUtils HTTP 130 and WPC -100. No separate download retry is added.
 - If the external files are absent or server initialization fails, attach only
   WPC. A 60-second cooldown prevents rapid retry loops on server failures.
+  The first Deno launch allows a bounded 12-second wait plus up to 6 seconds
+  of one-time cold-start grace while the child stays alive; later attempts
+  remain limited to 12 seconds. The safe `bgutil.startup` diagnostic records
+  phases, durations, ping counts and output *categories* without raw Deno logs.
   The separate diagnostic probe reports sanitized server states such as
   `invalid-external-installation`, `deno-executable-missing`,
   `deno-exited-before-ready:code=1`, or `server-ping-timeout`, without printing

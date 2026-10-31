@@ -30,6 +30,9 @@ PROVIDER_VERSION = "2.0.2"
 SOURCE_COMMIT = "26475e9d3665b972c4aeb83b4dbaafcf64b88438"
 PLUGIN_SHA256 = "a26b980bf6d8e8400d8f21445daa4d8381bf6183d20f0be309391f86b31e27ef"
 _START_TIMEOUT = 12.0
+# A cold Deno dependency load can exceed the normal budget. Allow one
+# bounded, explicitly logged grace period per external installation.
+_COLD_START_GRACE = 6.0
 _RETRY_DELAY = 60.0
 
 
@@ -93,6 +96,104 @@ def _ping_local_provider(url: str) -> bool:
         return False
 
 
+class _SafeDenoOutput:
+    """Drain Deno output and retain only fixed startup codes, never raw logs.
+
+    Upstream may print sensitive errors during token requests. Once startup
+    finishes, any buffered bytes are erased; draining continues so Deno
+    cannot block on a full stdout pipe.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._tail = b""
+        self._kind = "no-output"
+        self._first_output_ms = 0
+        self._started_at = time.monotonic()
+        self._sealed = False
+        self._thread: threading.Thread | None = None
+
+    @staticmethod
+    def _categorize(chunk: bytes) -> str:
+        text = chunk.lower()
+        if b"could not listen on" in text or b"eaddrinuse" in text:
+            return "listen-error"
+        if (b"module not found" in text or b"cannot find module" in text
+                or b"err_module_not_found" in text):
+            return "module-error"
+        if b"permission denied" in text or b"requires --allow" in text:
+            return "permission-error"
+        if b"failed to fetch" in text or b"error sending request" in text:
+            return "dependency-fetch-error"
+        if b"started pot server" in text:
+            return "server-announced"
+        if b"download" in text or b"compil" in text:
+            return "dependency-loading"
+        return "other-output"
+
+    def feed(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        with self._lock:
+            if self._sealed:
+                return
+            if self._kind == "no-output":
+                self._first_output_ms = max(
+                    0, round((time.monotonic() - self._started_at) * 1000)
+                )
+            # 128 bytes in memory, solely to match messages split across
+            # small pipe reads; never sent to disk, logs or the console.
+            combined = self._tail + chunk
+            self._tail = combined[-128:]
+            kind = self._categorize(combined)
+            severity = {
+                "no-output": 0, "other-output": 1, "dependency-loading": 2,
+                "server-announced": 3, "listen-error": 4, "module-error": 4,
+                "permission-error": 4, "dependency-fetch-error": 4,
+            }
+            if severity[kind] > severity[self._kind]:
+                self._kind = kind
+
+    def snapshot(self, *, seal: bool = False) -> tuple[str, int]:
+        with self._lock:
+            if seal:
+                self._sealed = True
+                self._tail = b""
+            return self._kind, self._first_output_ms
+
+    def start(self, process: subprocess.Popen[bytes]) -> None:
+        stream = getattr(process, "stdout", None)
+        if stream is None:
+            return
+
+        def drain() -> None:
+            try:
+                read_one = getattr(stream, "read1", stream.read)
+                while True:
+                    block = read_one(1024)
+                    if not block:
+                        break
+                    self.feed(block)
+            except (OSError, ValueError):
+                pass
+            finally:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+
+        self._thread = threading.Thread(
+            target=drain, name="RRV-BgUtils-safe-output", daemon=True,
+        )
+        self._thread.start()
+
+    def wait_for_exit(self) -> None:
+        if self._thread is not None:
+            # Only called after the child has exited or been stopped. Drain
+            # any buffered startup error before converting it to a safe code.
+            self._thread.join(timeout=0.2)
+
+
 class _BgUtilServer:
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -102,6 +203,7 @@ class _BgUtilServer:
         self._url = ""
         self._failed_until = 0.0
         self._verified_home: Path | None = None
+        self._cold_start_grace_available = True
         # Diagnostic states contain no cookies, tokens or personal filesystem paths.
         self._status = "not-started"
 
@@ -137,6 +239,7 @@ class _BgUtilServer:
                 self._stop_locked()
                 self._failed_until = 0.0
                 self._verified_home = None
+                self._cold_start_grace_available = True
                 self._status = "starting"
                 self._home, self._deno = home, deno
             if self._verified_home != home:
@@ -171,29 +274,71 @@ class _BgUtilServer:
                 "DENO_NO_UPDATE_CHECK": "1",
                 "FORCE_COLOR": "false",
             })
+            started_at = time.monotonic()
+            output = _SafeDenoOutput()
+            attempts = 0
+            process_pid = 0
+
+            def startup_event(phase: str, *, final: bool = False) -> None:
+                kind, first_output_ms = output.snapshot(seal=final)
+                record_bgutil_diagnostic(
+                    "bgutil.startup",
+                    pid=os.getpid(),
+                    server_pid=process_pid,
+                    phase=phase,
+                    status=self._status,
+                    startup_ms=max(0, round((time.monotonic() - started_at) * 1000)),
+                    ping_attempts=attempts,
+                    output_kind=kind,
+                    first_output_ms=first_output_ms,
+                )
+
             try:
                 process = subprocess.Popen(
                     command,
                     cwd=str(server / "node_modules"),
                     env=environment,
                     stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
                 )
             except OSError as error:
                 self._status = f"deno-launch-failed:{type(error).__name__}"
                 self._failed_until = time.monotonic() + _RETRY_DELAY
+                startup_event("launch-failed", final=True)
                 return None
 
             self._home, self._deno = home, deno
             self._process, self._url = process, url
-            deadline = time.monotonic() + _START_TIMEOUT
-            while time.monotonic() < deadline:
+            process_pid = int(getattr(process, "pid", 0) or 0)
+            try:
+                output.start(process)
+            except (OSError, RuntimeError, AttributeError):
+                # Diagnostic capture is not allowed to break media analysis.
+                # Avoid leaving a child with an undrained stdout pipe.
+                self._status = "output-monitor-failed"
+                self._stop_locked()
+                self._failed_until = time.monotonic() + _RETRY_DELAY
+                startup_event("failed", final=True)
+                return None
+            self._status = "starting"
+            startup_event("spawned")
+            normal_deadline = time.monotonic() + _START_TIMEOUT
+            allow_grace = self._cold_start_grace_available
+            self._cold_start_grace_available = False
+            final_deadline = normal_deadline + (_COLD_START_GRACE if allow_grace else 0)
+            grace_logged = False
+            while time.monotonic() < final_deadline:
                 if process.poll() is not None:
                     break
+                if not grace_logged and time.monotonic() >= normal_deadline:
+                    grace_logged = True
+                    startup_event("cold-grace")
+                attempts += 1
                 if _ping_local_provider(url):
                     self._status = "ready"
+                    startup_event("ready", final=True)
                     # yt-dlp --plugin-dirs scans immediate children of this
                     # directory, including the verified plugin.zip archive.
                     # Passing home/plugins would scan inside yt_dlp_plugins and
@@ -205,7 +350,11 @@ class _BgUtilServer:
                 f"deno-exited-before-ready:code={exit_code}"
                 if exit_code is not None else "server-ping-timeout"
             )
+            # Stop the child and drain buffered output before classifying
+            # startup failure. Never persist or print the actual output.
             self._stop_locked()
+            output.wait_for_exit()
+            startup_event("failed", final=True)
             self._failed_until = time.monotonic() + _RETRY_DELAY
             return None
 

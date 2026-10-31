@@ -149,6 +149,152 @@ class BgutilHTTPTests(unittest.TestCase):
             self.assertIsNone(server.ensure(self.root, self.deno))
         self.assertEqual(server.status(), "deno-exited-before-ready:code=27")
 
+    def test_startup_output_classifies_without_persisting_raw_bytes(self):
+        monitor = bgutil._SafeDenoOutput()
+        secret = b"TOP_SECRET_TOKEN_DATA_EXAMPLE_12345"
+        monitor.feed(b"Started POT ser")
+        monitor.feed(b"ver (v2.0.2) on address 127.0.0.1:12345\n" + secret)
+        self.assertEqual(monitor.snapshot()[0], "server-announced")
+        self.assertGreaterEqual(monitor.snapshot()[1], 0)
+        monitor.snapshot(seal=True)
+        self.assertEqual(monitor._tail, b"")
+        monitor.feed(secret)
+        self.assertNotIn(secret, repr(vars(monitor)).encode("utf-8"))
+
+    def test_startup_output_recognizes_safe_error_categories(self):
+        messages = {
+            b"Could not listen on 127.0.0.1 (Caused by EADDRINUSE)": "listen-error",
+            b"error: Module not found in local cache": "module-error",
+            b"Permission denied while loading DLL": "permission-error",
+            b"Failed to fetch package": "dependency-fetch-error",
+            b"Downloading npm dependencies": "dependency-loading",
+        }
+        for message, expected in messages.items():
+            with self.subTest(category=expected):
+                collector = bgutil._SafeDenoOutput()
+                collector.feed(message)
+                self.assertEqual(collector.snapshot()[0], expected)
+                collector.snapshot(seal=True)
+
+    def test_timeout_logs_safe_state_then_preserves_fallback(self):
+        server = bgutil._BgUtilServer()
+        fake = FakeProcess()
+        fake.pid = 18761
+        with (patch.object(bgutil, "_free_loopback_port", return_value=12024),
+              patch.object(bgutil, "_START_TIMEOUT", 0),
+              patch.object(bgutil, "_COLD_START_GRACE", 0),
+              patch.object(bgutil.subprocess, "Popen", return_value=fake),
+              patch.object(bgutil, "record_bgutil_diagnostic") as log,
+              patch.object(bgutil, "_ping_local_provider", return_value=False)):
+            self.assertIsNone(server.ensure(self.root, self.deno))
+            self.assertEqual(server.status(), "server-ping-timeout")
+            first = [call for call in log.call_args_list
+                     if call.args and call.args[0] == "bgutil.startup"]
+            self.assertEqual([call.kwargs["phase"] for call in first], ["spawned", "failed"])
+            self.assertEqual(first[-1].kwargs["output_kind"], "no-output")
+            self.assertEqual(first[-1].kwargs["status"], "server-ping-timeout")
+            self.assertEqual(first[-1].kwargs["server_pid"], 18761)
+            self.assertEqual(fake.terminated, 1)
+            self.assertIsNone(server.ensure(self.root, self.deno))
+            self.assertEqual(server.status(), "retry-cooldown")
+
+    def test_one_time_cold_grace_recovers_delayed_server(self):
+        server = bgutil._BgUtilServer()
+        fake = FakeProcess()
+        fake.pid = 19002
+        clock = [0.0]
+
+        def tick():
+            return clock[0]
+
+        def ping(_url):
+            clock[0] += 0.06
+            return clock[0] >= 0.18
+
+        with (patch.object(bgutil.time, "monotonic", side_effect=tick),
+              patch.object(bgutil.time, "sleep"),
+              patch.object(bgutil, "_START_TIMEOUT", 0.1),
+              patch.object(bgutil, "_COLD_START_GRACE", 0.4),
+              patch.object(bgutil, "_free_loopback_port", return_value=12024),
+              patch.object(bgutil.subprocess, "Popen", return_value=fake),
+              patch.object(bgutil, "record_bgutil_diagnostic") as log,
+              patch.object(bgutil, "_ping_local_provider", side_effect=ping)):
+            self.assertIsNotNone(server.ensure(self.root, self.deno))
+            states = [call.kwargs["phase"] for call in log.call_args_list
+                      if call.args and call.args[0] == "bgutil.startup"]
+            self.assertEqual(states, ["spawned", "cold-grace", "ready"])
+            self.assertFalse(server._cold_start_grace_available)
+            server.close()
+        self.assertEqual(fake.terminated, 1)
+
+    def test_safe_output_drains_large_pipe_without_leaking_token(self):
+        import subprocess
+        import sys
+
+        token = "FAKE_PRIVATE_TOKEN_12345"
+        program = (
+            "import sys; "
+            "sys.stdout.buffer.write(b'Started POT server\\n');"
+            f"sys.stdout.buffer.write({token!r}.encode() * 7000); "
+            "sys.stdout.flush()"
+        )
+        process = subprocess.Popen(
+            [sys.executable, "-u", "-c", program],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        monitor = bgutil._SafeDenoOutput()
+        monitor.start(process)
+        process.wait(timeout=15)
+        monitor.wait_for_exit()
+        self.assertEqual(monitor.snapshot(seal=True)[0], "server-announced")
+        self.assertEqual(monitor._tail, b"")
+        self.assertNotIn(token, repr(vars(monitor)))
+
+    def test_monitor_thread_failure_cleans_up_and_falls_back(self):
+        server = bgutil._BgUtilServer()
+        fake = FakeProcess()
+        with (patch.object(bgutil, "_free_loopback_port", return_value=12024),
+              patch.object(bgutil.subprocess, "Popen", return_value=fake),
+              patch.object(bgutil._SafeDenoOutput, "start",
+                           side_effect=RuntimeError("SENSITIVE_RUNTIME_OUTPUT"))):
+            self.assertIsNone(server.ensure(self.root, self.deno))
+            self.assertEqual(server.status(), "output-monitor-failed")
+            self.assertEqual(fake.terminated, 1)
+
+    def test_grace_is_not_repeated_after_initial_success(self):
+        server = bgutil._BgUtilServer()
+        first = FakeProcess()
+        second = FakeProcess()
+        clock = [0.0]
+        pings = [True]
+
+        def tick():
+            return clock[0]
+
+        def sleep(seconds):
+            clock[0] += seconds
+
+        def ping(_url):
+            return pings.pop(0) if pings else False
+
+        with (patch.object(bgutil.time, "monotonic", side_effect=tick),
+              patch.object(bgutil.time, "sleep", side_effect=sleep),
+              patch.object(bgutil, "_START_TIMEOUT", 0.25),
+              patch.object(bgutil, "_COLD_START_GRACE", 0.4),
+              patch.object(bgutil, "_free_loopback_port", return_value=12024),
+              patch.object(bgutil.subprocess, "Popen", side_effect=[first, second]),
+              patch.object(bgutil, "_ping_local_provider", side_effect=ping),
+              patch.object(bgutil, "record_bgutil_diagnostic") as log):
+            self.assertIsNotNone(server.ensure(self.root, self.deno))
+            server._stop_locked()
+            self.assertIsNone(server.ensure(self.root, self.deno))
+            self.assertEqual(server.status(), "server-ping-timeout")
+            phases = [call.kwargs["phase"] for call in log.call_args_list
+                      if call.args and call.args[0] == "bgutil.startup"]
+            self.assertEqual(phases, ["spawned", "ready", "spawned", "failed"])
+            self.assertLess(clock[0], 0.5)
+
     def test_status_does_not_leak_when_disabled(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(bgutil.bgutil_http_status(), "disabled")

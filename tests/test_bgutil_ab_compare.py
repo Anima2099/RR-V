@@ -125,6 +125,26 @@ class BgutilABComparisonTests(unittest.TestCase):
         self.assertEqual(out.status, 'provider-setup-mismatch')
         run.assert_not_called()
 
+    def test_startup_timeout_gets_specific_safe_comparison_status(self):
+        fake_pkg = ModuleType("services")
+        fake_bgutil = ModuleType("services.bgutil_http_service")
+        fake_bgutil.bgutil_http_status = lambda: "server-ping-timeout"
+        with (
+            patch.dict(sys.modules, {
+                "services": fake_pkg,
+                "services.bgutil_http_service": fake_bgutil,
+            }),
+            patch.object(BENCH, "_command", return_value=[
+                "yt-dlp.exe", "--plugin-dirs", "wpc-dir",
+            ]),
+            patch.object(BENCH.subprocess, "run") as subprocess_run,
+        ):
+            result = BENCH.run_trial(
+                Path("yt-dlp.exe"), BENCH.DEFAULT_VIDEO, "bgutil", 1, "/external",
+            )
+        self.assertEqual(result.status, "bgutil-startup-timeout")
+        subprocess_run.assert_not_called()
+
     def test_summary_uses_only_safe_fields(self):
         output = StringIO()
         result = BENCH.Trial('bgutil', 1, 'ok', 10, 20, 30, 'bgutil', False, True, True)

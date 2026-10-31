@@ -67,6 +67,37 @@ Optional: pass `--video "https://www.youtube.com/watch?v=..."` for another
 public, unauthenticated video. Use the SAME URL for both modes by running one
 script invocation, not separate manual commands.
 
+## Deno cold-start diagnostics and bounded recovery
+
+The new `bgutil.startup` events in
+`%APPDATA%\\RR-V\\logs\\bgutil-stage03.log` distinguish:
+
+- `phase=spawned`: the Deno process was launched. The log includes a process
+  identifier and an elapsed time, never the command line.
+- `phase=cold-grace`: the **first** launch in a Python process remained alive
+  after the ordinary 12-second limit. It receives a single additional
+  6-second grace period. Subsequent attempts retain the original 12-second
+  budget, and a failed start still triggers the 60-second retry cooldown.
+- `phase=ready`: HTTP `/ping` returned the pinned provider version.
+- `phase=failed`: Deno exited or failed to return a valid `/ping`
+  response by the bounded deadline. The connection falls back to WPC.
+- `phase=launch-failed`: Deno could not be launched.
+
+Each startup event includes the **safe** fields `startup_ms`, `ping_attempts`,
+`output_kind` and `first_output_ms`. The output category is restricted to
+`no-output`, `other-output`, `dependency-loading`, `server-announced`,
+`listen-error`, `module-error`, `permission-error`, or
+`dependency-fetch-error`. This is evidence to guide diagnosis, not a
+guarantee of the root cause. Deno stdout/stderr are drained in memory and
+converted to those allowlisted categories. **Raw Deno output, paths and PO
+Tokens are never written or printed**. The capture thread continues draining
+after startup without retaining text.
+
+If a comparison stops at `bgutil-startup-timeout` (or another
+`provider-setup-mismatch`), inspect the latest `bgutil.startup` event before
+changing the timeout or reinstalling any components. Do not repeat a failing
+comparison without examining the log.
+
 ## How to interpret results
 
 - `status=ok` means yt-dlp simulated extraction succeeded and the expected

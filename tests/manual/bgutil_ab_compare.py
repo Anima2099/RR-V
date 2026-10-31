@@ -118,7 +118,17 @@ def run_trial(executable: Path, video: str, scenario: str, trial: int,
     has_bgutil = any("youtubepot-bgutilhttp:base_url=" in part for part in command)
     expected_dir_count = 2 if scenario == "bgutil" else 1
     if len(plugin_dirs) != expected_dir_count or has_bgutil != (scenario == "bgutil"):
-        return Trial(scenario, trial, "provider-setup-mismatch", setup_ms, 0, setup_ms,
+        status = "provider-setup-mismatch"
+        if scenario == "bgutil" and not has_bgutil:
+            # Distinguish the observed Deno timeout from an unrelated plugin
+            # argument error without ever exposing process output or paths.
+            try:
+                from services.bgutil_http_service import bgutil_http_status
+                if bgutil_http_status() == "server-ping-timeout":
+                    status = "bgutil-startup-timeout"
+            except (ImportError, OSError):
+                pass
+        return Trial(scenario, trial, status, setup_ms, 0, setup_ms,
                      "none", False, False, False)
     if any(item == "--cookies" for item in command):
         return Trial(scenario, trial, "unexpected-cookies", setup_ms, 0, setup_ms,
