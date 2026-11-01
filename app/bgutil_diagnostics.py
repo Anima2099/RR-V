@@ -27,6 +27,9 @@ _ALLOWED_FIELDS = frozenset({
     "phase", "startup_ms", "ping_attempts", "output_kind", "first_output_ms",
     "parent_pid", "order", "wall_ms", "launcher_pid",
     "attempt", "announced_ms", "tcp_ms", "ping_ms", "tcp_checks", "worst_ping_ms",
+    "cpu_ms", "read_kb", "uptime_min", "free_memory_pct", "free_disk_gb",
+    "drive_type", "proxy_flag", "defender_flag", "motw_flag",
+    "cache_state", "modules_state", "reparse_flag", "sample_read_ms",
 })
 
 
