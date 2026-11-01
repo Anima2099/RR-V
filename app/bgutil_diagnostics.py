@@ -30,6 +30,9 @@ _ALLOWED_FIELDS = frozenset({
     "cpu_ms", "read_kb", "uptime_min", "free_memory_pct", "free_disk_gb",
     "drive_type", "proxy_flag", "defender_flag", "motw_flag",
     "cache_state", "modules_state", "reparse_flag", "sample_read_ms",
+    "window_start_s", "window_end_s", "write_kb", "other_ops",
+    "page_faults", "system_cpu_pct", "memory_mb", "thread_count",
+
 })
 
 
