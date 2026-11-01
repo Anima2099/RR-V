@@ -19,6 +19,9 @@ D = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = D
 SPEC.loader.exec_module(D)
 GB = 1024**3
+# Windows virtualenv python.exe can be a redirector that exits before the
+# real interpreter. For direct-child timeout tests use the base executable.
+TEST_PYTHON = getattr(sys, "_base_executable", sys.executable)
 
 
 class FakeResult:
@@ -46,6 +49,8 @@ class OnebootTests(unittest.TestCase):
         calls=[]
         def run(cmd, **kw):
             calls.append(cmd)
+            if '-status' in cmd:
+                return FakeResult(text='WPR is not recording')
             if '-stop' in cmd:
                 Path(cmd[cmd.index('-stop')+1]).write_bytes(b'WPR_PRIVATE_PREFLIGHT')
             return FakeResult(text='CPU\nDiskIO\nFileIO\nNetwork\nMinifilter\nRegistry')
@@ -53,14 +58,17 @@ class OnebootTests(unittest.TestCase):
             out=D.preflight('wpr.exe',admin=True,free_bytes=12*GB,wpa_available=True,check_tools=False)
         self.assertTrue(out.ok)
         self.assertIn('Minifilter',out.profiles)
-        self.assertIn('-stop',calls[-1])
-        self.assertIn('-start',calls[-2])
+        self.assertTrue(any('-stop' in cmd for cmd in calls))
+        self.assertTrue(any('-start' in cmd for cmd in calls))
+        self.assertEqual(calls[-1],['wpr.exe','-status'])
         self.assertEqual(out.disk_gb,12)
 
     def test_start_failure_never_cancels_another_trace(self):
         calls=[]
         def run(cmd, **kw):
             calls.append(cmd)
+            if '-status' in cmd:
+                return FakeResult(text='WPR is not recording')
             return FakeResult(code=1) if '-start' in cmd else FakeResult(text='CPU DiskIO FileIO')
         with patch.object(D,'run_private',side_effect=run):
             out=D.preflight('wpr.exe',admin=True,free_bytes=10*GB,wpa_available=False,check_tools=False)
@@ -69,14 +77,28 @@ class OnebootTests(unittest.TestCase):
 
     def test_stop_save_failure_blocks_reboot_and_attempts_cancel(self):
         calls = []
+        state={'active':False}
         def run(cmd, **kw):
             calls.append(cmd)
-            return FakeResult(code=1) if '-stop' in cmd else FakeResult(text='CPU DiskIO FileIO')
+            if '-status' in cmd:
+                return FakeResult(text='WPR recording is in progress' if state['active'] else 'WPR is not recording')
+            if '-profiles' in cmd:
+                return FakeResult(text='CPU DiskIO FileIO')
+            if '-start' in cmd:
+                state['active']=True
+                return FakeResult()
+            if '-stop' in cmd:
+                return FakeResult(code=1)
+            if '-cancel' in cmd:
+                state['active']=False
+                return FakeResult()
+            return FakeResult(code=1)
         with patch.object(D,'run_private',side_effect=run):
             out=D.preflight('wpr.exe',admin=True,free_bytes=10*GB,wpa_available=False,check_tools=False)
         self.assertFalse(out.ok)
         self.assertEqual(out.reason,'wpr-stop-save-not-verified')
         self.assertIn(['wpr.exe','-cancel'],calls)
+        self.assertFalse(state['active'])
 
     def test_manifest_is_explicit_and_expires(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -231,23 +253,34 @@ class OnebootTests(unittest.TestCase):
             self.assertEqual(len(list(root.glob('oneboot-*/*.etl'))),1)
 
     def test_capture_not_run_without_preflight_or_admin(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
         stub_os=types.SimpleNamespace(name='nt',environ=os.environ,getpid=os.getpid)
-        with (patch.object(D,'os',stub_os),
+        with (redirect_stdout(StringIO()),
+              patch.object(D,'os',stub_os),
               patch.object(D,'read_preflight',return_value=()),
               patch.object(D,'elevated',return_value=True)):
             self.assertEqual(D.run_capture(),2)
-        with (patch.object(D,'os',stub_os),
+        with (redirect_stdout(StringIO()),
+              patch.object(D,'os',stub_os),
               patch.object(D,'read_preflight',return_value=('CPU','DiskIO','FileIO')),
               patch.object(D,'elevated',return_value=False)):
             self.assertEqual(D.run_capture(),2)
 
     def test_nonwindows_capture_refused_before_any_operation(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
         if os.name!='nt':
-            self.assertEqual(D.run_capture(),2)
+            with redirect_stdout(StringIO()):
+                self.assertEqual(D.run_capture(),2)
 
     def test_main_requires_explicit_mode(self):
-        with self.assertRaises(SystemExit):
-            D.main([])
+        from contextlib import redirect_stderr
+        from io import StringIO
+        with redirect_stderr(StringIO()) as stderr:
+            with self.assertRaises(SystemExit):
+                D.main([])
+        self.assertIn("--preflight", stderr.getvalue())
 
     def test_preflight_failure_does_not_store_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -258,6 +291,268 @@ class OnebootTests(unittest.TestCase):
     def test_wpr_args_in_memory_mode_not_unbounded_filemode(self):
         self.assertNotIn('-filemode', D.wpr_command(('CPU','DiskIO','FileIO')))
         self.assertNotIn('-recordtempto', D.wpr_command(('CPU','DiskIO','FileIO')))
+
+    def test_preflight_existing_wpr_session_is_never_touched(self):
+        calls = []
+        def fake(command, **kwargs):
+            calls.append(command)
+            return FakeResult(text='WPR recording is in progress')
+        with patch.object(D, 'run_private', side_effect=fake):
+            result = D.preflight('wpr.exe', admin=True, free_bytes=11*GB,
+                                 wpa_available=False, check_tools=False)
+        self.assertFalse(result.ok)
+        self.assertIn('existing-or-unverified', result.reason)
+        self.assertEqual(calls, [['wpr.exe', '-status']])
+
+    def test_preflight_unknown_wpr_status_fails_closed(self):
+        with patch.object(D, 'run_private', return_value=FakeResult(text='INDETERMINATE_WPR_STATE')) as fake:
+            result = D.preflight('wpr.exe', admin=True, free_bytes=10*GB,
+                                 wpa_available=False, check_tools=False)
+        self.assertFalse(result.ok)
+        self.assertEqual(fake.call_count, 1)
+
+    def test_preflight_start_timeout_does_not_cancel_unverified_trace(self):
+        calls = []
+        def fake(command, **kw):
+            calls.append(command)
+            if '-status' in command:
+                return FakeResult(text='WPR is not recording')
+            if '-profiles' in command:
+                return FakeResult(text='CPU DiskIO FileIO')
+            if '-start' in command:
+                raise __import__('subprocess').TimeoutExpired('PRIVATE_COMMAND', 25)
+            raise AssertionError('no other WPR command should be run')
+        with patch.object(D, 'run_private', side_effect=fake):
+            result = D.preflight('wpr.exe', admin=True, free_bytes=10*GB,
+                                 wpa_available=False, check_tools=False)
+        self.assertEqual(result.reason, 'wpr-start-timeout-ownership-uncertain-check-status')
+        self.assertFalse(any('-cancel' in cmd for cmd in calls))
+
+    def test_preflight_optional_profile_failure_uses_safe_core_fallback(self):
+        calls = []
+        def fake(command, **kw):
+            calls.append(command)
+            if '-status' in command:
+                return FakeResult(text='WPR is not recording')
+            if '-profiles' in command:
+                return FakeResult(text='CPU DiskIO FileIO Registry Network Minifilter')
+            if '-start' in command:
+                return FakeResult(code=1 if 'Registry' in command else 0)
+            if '-stop' in command:
+                Path(command[command.index('-stop')+1]).write_bytes(b'PRIVATE_WPR_OUTPUT')
+                return FakeResult()
+            raise AssertionError('unexpected WPR call')
+        with patch.object(D, 'run_private', side_effect=fake):
+            result = D.preflight('wpr.exe', admin=True, free_bytes=10*GB,
+                                 wpa_available=True, check_tools=False)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.profiles, D.PROFILES_CORE)
+        self.assertEqual(sum('-start' in cmd for cmd in calls), 2)
+        self.assertFalse(any('-cancel' in cmd for cmd in calls))
+
+    def test_preflight_optional_profile_failure_never_retries_while_recording(self):
+        calls = []
+        status = {'count': 0}
+        def fake(command, **kw):
+            calls.append(command)
+            if '-status' in command:
+                status['count'] += 1
+                return FakeResult(text='WPR is not recording' if status['count'] == 1
+                                  else 'WPR recording is in progress')
+            if '-profiles' in command:
+                return FakeResult(text='CPU DiskIO FileIO Registry')
+            if '-start' in command:
+                return FakeResult(code=1)
+            raise AssertionError('should not try another WPR operation')
+        with patch.object(D, 'run_private', side_effect=fake):
+            result = D.preflight('wpr.exe', admin=True, free_bytes=10*GB,
+                                 wpa_available=False, check_tools=False)
+        self.assertFalse(result.ok)
+        self.assertEqual(sum('-start' in cmd for cmd in calls), 1)
+        self.assertFalse(any('-cancel' in cmd for cmd in calls))
+
+    def test_preflight_stop_timeout_attempts_cancel_only_after_confirmed_start(self):
+        status = {'recording': False}
+        calls = []
+        def fake(command, **kw):
+            calls.append(command)
+            if '-status' in command:
+                return FakeResult(text='WPR recording is in progress' if status['recording']
+                                  else 'WPR is not recording')
+            if '-profiles' in command:
+                return FakeResult(text='CPU DiskIO FileIO')
+            if '-start' in command:
+                status['recording'] = True
+                return FakeResult()
+            if '-stop' in command:
+                raise __import__('subprocess').TimeoutExpired('PRIVATE_PATH', 90)
+            if '-cancel' in command:
+                status['recording'] = False
+                return FakeResult()
+            raise AssertionError('unexpected WPR call')
+        with patch.object(D, 'run_private', side_effect=fake):
+            result = D.preflight('wpr.exe', admin=True, free_bytes=10*GB,
+                                 wpa_available=False, check_tools=False)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.reason, 'wpr-stop-save-not-verified')
+        self.assertIn(['wpr.exe', '-cancel'], calls)
+        self.assertFalse(status['recording'])
+
+    def test_preflight_cancel_failure_requires_manual_check(self):
+        state = {'active': False}
+        def fake(command, **kw):
+            if '-status' in command:
+                return FakeResult(text='WPR recording is in progress' if state['active']
+                                  else 'WPR is not recording')
+            if '-profiles' in command:
+                return FakeResult(text='CPU DiskIO FileIO')
+            if '-start' in command:
+                state['active'] = True
+                return FakeResult()
+            if '-stop' in command or '-cancel' in command:
+                return FakeResult(code=1)
+            raise AssertionError('unexpected WPR call')
+        with patch.object(D, 'run_private', side_effect=fake):
+            result = D.preflight('wpr.exe', admin=True, free_bytes=10*GB,
+                                 wpa_available=False, check_tools=False)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.reason, 'wpr-owned-trace-cleanup-unconfirmed')
+
+    def test_preflight_global_budget_bounds_work(self):
+        with (patch.object(D, 'PREFLIGHT_OVERALL_TIMEOUT', 0.0),
+              patch.object(D, 'run_private') as run):
+            result = D.preflight('wpr.exe', admin=True, free_bytes=10*GB,
+                                 wpa_available=False, check_tools=False)
+        self.assertFalse(result.ok)
+        run.assert_not_called()
+        self.assertEqual(result.reason, 'wpr-command-timeout-or-global-budget-check-status')
+
+    def test_preflight_ctrl_c_returns_visible_safe_status(self):
+        with patch.object(D, 'run_private', side_effect=KeyboardInterrupt):
+            result = D.preflight('wpr.exe', admin=True, free_bytes=10*GB,
+                                 wpa_available=False, check_tools=False)
+        self.assertEqual(result.reason, 'interrupted-check-wpr-status-do-not-reboot')
+
+    def test_private_subprocess_timeout_is_bounded_without_raw_output(self):
+        import subprocess
+        import time
+        started = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            D.run_private([TEST_PYTHON, '-c', 'import time; time.sleep(10)'],
+                          timeout=.25, stage='TEST')
+        # taskkill /T on Windows can spend extra seconds cleaning descendants.
+        self.assertLess(time.monotonic() - started, 9.0 if os.name == "nt" else 2.0)
+
+    def test_private_subprocess_heartbeat_shows_only_safe_timing(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        with (patch.object(D, 'WPR_POLL_INTERVAL', .08),
+              redirect_stdout(StringIO()) as captured):
+            result = D.run_private([TEST_PYTHON, '-c',
+                "import time;print('PRIVATE_SECRET');time.sleep(.35)"],
+                timeout=2, stage='TEST')
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('PRIVATE_SECRET', result.stdout)
+        self.assertIn('[WPR TEST] still running', captured.getvalue())
+        self.assertNotIn('PRIVATE_SECRET', captured.getvalue())
+
+    def test_wpr_idle_parser_recognizes_user_version_and_rejects_unknown(self):
+        self.assertEqual(D._wpr_status_category('WPR is not recording'), 'idle')
+        self.assertEqual(D._wpr_status_category('WPR recording is in progress'), 'active')
+        self.assertEqual(D._wpr_status_category('WPR something else'), 'unknown')
+
+    def test_run_preflight_failure_invalidates_stale_manifest(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder/'preflight.json').write_text('{"ready": true}')
+            with (patch.object(D, 'diagnostic_home', return_value=folder),
+                  patch.object(D, 'validate_home_and_deno', return_value=(None,folder,folder/'deno','ready')),
+                  patch.object(D, 'preflight', return_value=D.Preflight(False, 'failure', admin=True, disk_gb=11)),
+                  patch.object(D.shutil, 'which', return_value='wpr.exe'),
+                  patch.object(D.shutil, 'disk_usage', return_value=types.SimpleNamespace(free=11*GB)),
+                  patch.object(D, 'elevated', return_value=True),
+                  redirect_stdout(StringIO()) as output):
+                status = D.run_preflight()
+            self.assertEqual(status, 2)
+            self.assertFalse((folder/'preflight.json').exists())
+            self.assertIn('PREFLIGHT: NOT READY', output.getvalue())
+            self.assertIn('[WPR START]', output.getvalue())
+
+
+    def test_preflight_real_subprocess_wpr_emulator_completes_and_cleans_up(self):
+        """Exercise actual Popen/wait/tempfile/phase logic without Windows WPR."""
+        if os.name == 'nt':
+            self.skipTest('POSIX executable script for offline integration')
+        from contextlib import redirect_stdout
+        from io import StringIO
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            executable = root / 'fake-wpr'
+            recording = root / 'recording'
+            executable.write_text('''#!/usr/bin/env python3
+import sys
+from pathlib import Path
+state = Path(__file__).with_name('recording')
+a = sys.argv[1:]
+if '-status' in a:
+    print('WPR recording is in progress' if state.exists() else 'WPR is not recording')
+elif '-profiles' in a:
+    print('CPU DiskIO FileIO Registry Network Minifilter')
+elif '-start' in a:
+    state.write_text('private-state')
+elif '-stop' in a:
+    Path(a[a.index('-stop')+1]).write_bytes(b'PRIVATE-ETL-DATA')
+    state.unlink()
+elif '-cancel' in a:
+    state.unlink(missing_ok=True)
+else:
+    raise SystemExit(2)
+''', encoding='utf-8')
+            executable.chmod(0o755)
+            with redirect_stdout(StringIO()) as captured:
+                result = D.preflight(str(executable), admin=True, free_bytes=10*GB,
+                                     wpa_available=False, check_tools=False)
+            self.assertTrue(result.ok, result.reason)
+            self.assertFalse(recording.exists())
+            self.assertIn('5/5 status-after', captured.getvalue())
+            self.assertIn('all checks passed', captured.getvalue())
+            self.assertNotIn('private-state', captured.getvalue())
+            self.assertNotIn('PRIVATE-ETL-DATA', captured.getvalue())
+
+    def test_subprocess_with_inherited_child_output_does_not_block(self):
+        """Grandchild holds stdout open; our wait must not wait for that child."""
+        import time
+        with tempfile.TemporaryDirectory() as tmp:
+            sentinel = Path(tmp) / 'release-child'
+            grandchild = ("import time,pathlib; "
+                          f"p=pathlib.Path({str(sentinel)!r}); "
+                          "[(time.sleep(.05)) for _ in range(120) if not p.exists()]")
+            parent = ("import subprocess,sys; "
+                      f"subprocess.Popen([sys.executable,'-c',{grandchild!r}],"
+                      "stdout=sys.stdout,stderr=sys.stderr,stdin=subprocess.DEVNULL); "
+                      "print('WPR is not recording')")
+            started = time.monotonic()
+            try:
+                out = D.run_private([TEST_PYTHON, '-c', parent], timeout=3)
+            finally:
+                sentinel.touch()  # Release only our test's descendant.
+                time.sleep(.2)
+            self.assertEqual(out.returncode, 0)
+            self.assertIn('WPR is not recording', out.stdout)
+            self.assertLess(time.monotonic()-started, 2.9)
+
+    def test_existing_preflight_manifest_version_one_is_invalidated(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp)
+            D.save_preflight(D.Preflight(True, 'ready', D.PROFILES_CORE), path)
+            self.assertEqual(D.read_preflight(path), D.PROFILES_CORE)
+            payload = json.loads((path / 'preflight.json').read_text())
+            payload['version'] = 1
+            (path / 'preflight.json').write_text(json.dumps(payload))
+            self.assertEqual(D.read_preflight(path), ())
+
 
 
 if __name__ == '__main__':

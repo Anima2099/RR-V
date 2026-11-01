@@ -33,6 +33,14 @@ COLD_DEADLINE = 70.0
 POLL = 1.0
 MIN_FREE_BYTES = 3 * (1024 ** 3)
 PREFLIGHT_VALID_DAYS = 7
+PREFLIGHT_MANIFEST_VERSION = 2
+PREFLIGHT_OVERALL_TIMEOUT = 175.0
+PREFLIGHT_PROFILE_TIMEOUT = 20.0
+PREFLIGHT_STATUS_TIMEOUT = 10.0
+PREFLIGHT_START_TIMEOUT = 25.0
+PREFLIGHT_STOP_TIMEOUT = 90.0
+PREFLIGHT_CANCEL_TIMEOUT = 25.0
+WPR_POLL_INTERVAL = 5.0
 PROFILES_CORE = ("CPU", "DiskIO", "FileIO")
 PROFILES_OPTIONAL = ("Registry", "Network", "Minifilter")
 ALLOWED_PROFILES = frozenset(PROFILES_CORE + PROFILES_OPTIONAL)
@@ -64,12 +72,87 @@ def elevated() -> bool:
         return False
 
 
-def run_private(command: list[str], timeout: float = 30.0, **options):
-    """Capture untrusted process output only in memory, never print it."""
-    return subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, text=True, errors="replace",
-                          timeout=timeout, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                          **options)
+def _progress(stage: str, message: str) -> None:
+    """Only fixed WPR phase names and safe timings, never command output."""
+    print(f"[WPR {stage}] {message}", flush=True)
+
+
+def _kill_private_child(process) -> None:
+    """Terminate only the subprocess we launched and its descendants.
+
+    WPR recording sessions are NOT the same as wpr.exe process trees.
+    Never run `wpr -cancel` here: recording ownership is handled separately.
+    """
+    if process.poll() is None and os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, timeout=5,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    if process.poll() is None:
+        try:
+            process.kill()
+        except OSError:
+            pass
+    try:
+        process.wait(timeout=2)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def run_private(command: list[str], timeout: float = 30.0,
+                *, stage: str | None = None, **options):
+    """Run WPR with visible bounded progress and temporary file-backed output.
+
+    A descendant can inherit PIPE handles and make subprocess.run/communicate
+    wait after wpr.exe exits. An unnamed temporary file avoids that specific
+    deadlock and is closed/deleted immediately. Its contents are NEVER logged.
+    A stuck direct child and its descendants are terminated at the deadline.
+    """
+    started = perf_counter()
+    with tempfile.TemporaryFile(mode="w+b") as capture:
+        process = subprocess.Popen(
+            command, stdin=subprocess.DEVNULL, stdout=capture,
+            stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            **options,
+        )
+        try:
+            while True:
+                elapsed = perf_counter() - started
+                remaining = timeout - elapsed
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired("private-WPR-step", timeout)
+                try:
+                    returncode = process.wait(timeout=min(WPR_POLL_INTERVAL, remaining))
+                    break
+                except subprocess.TimeoutExpired:
+                    if stage:
+                        _progress(stage, f"still running ({round(perf_counter()-started,1)}s / {max(1,round(timeout))}s limit)")
+        except BaseException:
+            _kill_private_child(process)
+            raise
+        capture.seek(0)
+        raw = capture.read(256 * 1024)
+        # Profile names and status phrases are ASCII. Never print raw output.
+        if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+            decoded = raw.decode("utf-16", errors="replace")
+        else:
+            decoded = raw.decode("utf-8", errors="replace")
+        return subprocess.CompletedProcess(command, returncode, decoded, "")
+
+
+def _wpr_status_category(output: str) -> str:
+    """Be strict: unknown/localized WPR output must never imply ownership."""
+    if re.search(r"\b(?:not recording|no trace profiles running|no recording in progress)\b", output, re.I):
+        return "idle"
+    if re.search(r"\brecording(?: is)? in progress\b", output, re.I):
+        return "active"
+    return "unknown"
 
 
 def fixed_profile_names(raw: str) -> tuple[str, ...]:
@@ -100,6 +183,7 @@ class Preflight:
 
 def preflight(probe_wpr: str | None, *, admin: bool, free_bytes: int,
               wpa_available: bool, check_tools=True) -> Preflight:
+    """Bounded, visible WPR preflight with strict recording ownership rules."""
     free_gb = max(0, int(free_bytes // (1024 ** 3)))
     if os.name != "nt" and check_tools:
         return Preflight(False, "windows-required")
@@ -109,52 +193,115 @@ def preflight(probe_wpr: str | None, *, admin: bool, free_bytes: int,
         return Preflight(False, "insufficient-disk-space", admin=True, disk_gb=free_gb)
     if not probe_wpr:
         return Preflight(False, "wpr-unavailable", admin=True, disk_gb=free_gb)
+
+    begun = perf_counter()
+    def failure(reason: str) -> Preflight:
+        _progress("RESULT", "not ready: " + reason)
+        return Preflight(False, reason, admin=True, disk_gb=free_gb)
+
+    def step(stage: str, args: list[str], ceiling: float):
+        remaining = PREFLIGHT_OVERALL_TIMEOUT - (perf_counter() - begun)
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired("preflight-overall-budget", PREFLIGHT_OVERALL_TIMEOUT)
+        limit = min(ceiling, remaining)
+        _progress(stage, f"starting (max {round(limit)}s)")
+        started = perf_counter()
+        try:
+            result = run_private([probe_wpr, *args], timeout=limit, stage=stage)
+        except subprocess.TimeoutExpired:
+            _progress(stage, "TIMEOUT; launched WPR command terminated; recording state not assumed")
+            raise
+        except OSError:
+            _progress(stage, "WPR command could not run")
+            raise
+        _progress(stage, f"finished in {round(perf_counter()-started,1)}s (exit={result.returncode})")
+        return result
+
+    def check_status(stage: str) -> str:
+        result = step(stage, ["-status"], PREFLIGHT_STATUS_TIMEOUT)
+        return _wpr_status_category(result.stdout)
+
     try:
-        discovered = run_private([probe_wpr, "-profiles"], timeout=20)
+        # Do NOT disrupt a WPR recording that was started by someone else.
+        if check_status("1/5 status-before") != "idle":
+            return failure("wpr-existing-or-unverified-session-do-not-cancel")
+
+        discovered = step("2/5 profile-list", ["-profiles"], PREFLIGHT_PROFILE_TIMEOUT)
         if discovered.returncode != 0:
-            return Preflight(False, "wpr-profiles-unavailable", admin=True, disk_gb=free_gb)
+            return failure("wpr-profiles-unavailable")
         available = fixed_profile_names(discovered.stdout)
         if not all(name in available for name in PROFILES_CORE):
-            return Preflight(False, "wpr-required-profiles-missing", admin=True, disk_gb=free_gb)
-        # Verify the exact recording combination while the user is NOT on a
-        # precious cold boot. Memory mode avoids unbounded temp file growth.
+            return failure("wpr-required-profiles-missing")
         picked = tuple(name for name in PROFILES_CORE + PROFILES_OPTIONAL if name in available)
-        started = run_private([probe_wpr, *wpr_command(picked)], timeout=25)
+        _progress("profiles", "candidate profiles: " + ", ".join(picked))
+
+        try:
+            started = step("3/5 test-start", wpr_command(picked), PREFLIGHT_START_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            # A timed-out start may nevertheless have created an active trace.
+            # We cannot safely establish ownership, so NEVER auto-cancel here.
+            return failure("wpr-start-timeout-ownership-uncertain-check-status")
         if started.returncode != 0:
-            # A failed start may mean someone else's session is active. Never
-            # issue -cancel unless *this* call definitively succeeded.
-            return Preflight(False, "wpr-start-failed-check-existing-session",
-                             admin=True, disk_gb=free_gb)
-        # Prove that STOP/SAVE works too. Preflight-only ETL is deleted by
-        # TemporaryDirectory, so no stale private capture remains on disk.
-        stop_ok = False
+            # Some profile combinations are incompatible. Only try the core
+            # profiles if the failed start left WPR demonstrably IDLE.
+            if picked != PROFILES_CORE and check_status("3/5 fallback-status") == "idle":
+                _progress("profiles", "optional combination failed; trying core profiles only")
+                picked = PROFILES_CORE
+                try:
+                    started = step("3/5 core-retry", wpr_command(picked), PREFLIGHT_START_TIMEOUT)
+                except subprocess.TimeoutExpired:
+                    return failure("wpr-core-start-timeout-ownership-uncertain-check-status")
+            if started.returncode != 0:
+                return failure("wpr-start-failed-check-existing-session")
+
+        # This successful -start return is the sole basis for trace ownership.
+        # If STOP fails, only cancel the trace started by THIS preflight.
+        saved_ok = False
         try:
             with tempfile.TemporaryDirectory(prefix="rrv-wpr-preflight-") as temp:
                 target = Path(temp) / "temporary-private.etl"
-                saved = run_private([probe_wpr, "-stop", str(target), "-skipPdbGen"], timeout=120)
-                stop_ok = saved.returncode == 0 and target.is_file()
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-        if not stop_ok:
-            # We know the start succeeded, so it is safe to cancel OUR trace.
+                try:
+                    saved = step("4/5 test-stop-save", ["-stop", str(target), "-skipPdbGen"],
+                                 PREFLIGHT_STOP_TIMEOUT)
+                    saved_ok = saved.returncode == 0 and target.is_file() and target.stat().st_size > 0
+                except (OSError, subprocess.TimeoutExpired):
+                    _progress("4/5 test-stop-save", "save did not complete; investigating owned trace state")
+        except OSError:
+            _progress("4/5 test-stop-save", "temporary trace storage failed")
+
+        if not saved_ok:
+            # Only cancel if status still says it is recording AND our -start
+            # was confirmed successful. Otherwise fail closed without cancel.
             try:
-                run_private([probe_wpr, "-cancel"], timeout=40)
+                if check_status("4/5 cleanup-status") == "active":
+                    cancelled = step("4/5 cancel-owned", ["-cancel"], PREFLIGHT_CANCEL_TIMEOUT)
+                    if cancelled.returncode != 0 or check_status("4/5 post-cancel-status") != "idle":
+                        return failure("wpr-owned-trace-cleanup-unconfirmed")
+                else:
+                    _progress("4/5 cleanup", "no verified active owned trace; not cancelling")
             except (OSError, subprocess.TimeoutExpired):
-                return Preflight(False, "wpr-stop-and-cancel-unconfirmed-check-status",
-                                 admin=True, disk_gb=free_gb)
-            return Preflight(False, "wpr-stop-save-not-verified",
-                             admin=True, disk_gb=free_gb)
+                return failure("wpr-owned-trace-cleanup-unconfirmed-check-status")
+            return failure("wpr-stop-save-not-verified")
+
+        if check_status("5/5 status-after") != "idle":
+            return failure("wpr-stop-status-unverified-check-status")
+        _progress("RESULT", "all checks passed")
         return Preflight(True, "ready", picked, True, free_gb, wpa_available)
-    except (OSError, subprocess.TimeoutExpired):
-        return Preflight(False, "wpr-command-failed-check-status",
-                         admin=True, disk_gb=free_gb)
+    except subprocess.TimeoutExpired:
+        return failure("wpr-command-timeout-or-global-budget-check-status")
+    except KeyboardInterrupt:
+        # Ctrl+C stops this preflight without touching sessions we cannot
+        # prove we own. A prior successful start may need manual inspection.
+        return failure("interrupted-check-wpr-status-do-not-reboot")
+    except OSError:
+        return failure("wpr-command-failed-check-status")
 
 
 def save_preflight(result: Preflight, folder: Path) -> None:
     if not result.ok:
         return
     folder.mkdir(parents=True, exist_ok=True)
-    payload = {"version": SUMMARY_VERSION, "created_utc": datetime.now(timezone.utc).timestamp(),
+    payload = {"version": PREFLIGHT_MANIFEST_VERSION, "created_utc": datetime.now(timezone.utc).timestamp(),
                "profiles": list(result.profiles), "ready": True}
     (folder / "preflight.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -165,7 +312,7 @@ def read_preflight(folder: Path, now: float | None = None) -> tuple[str, ...]:
         timestamp = payload["created_utc"]
         profiles = payload["profiles"]
         current = datetime.now(timezone.utc).timestamp() if now is None else now
-        if (payload.get("version") != SUMMARY_VERSION or payload.get("ready") is not True
+        if (payload.get("version") != PREFLIGHT_MANIFEST_VERSION or payload.get("ready") is not True
                 or type(timestamp) not in (int, float) or not 0 <= current-timestamp <= PREFLIGHT_VALID_DAYS*86400
                 or not isinstance(profiles, list) or not all(type(p) is str for p in profiles)
                 or not all(p in profiles for p in PROFILES_CORE)
@@ -186,7 +333,8 @@ class WprRecording:
 
     def start(self) -> str:
         try:
-            result = run_private([self.executable, *wpr_command(self.profiles)], timeout=30)
+            result = run_private([self.executable, *wpr_command(self.profiles)], timeout=30,
+                                 stage="capture-start")
             self.owned = result.returncode == 0
             self.status = "recording" if self.owned else "start-failed"
         except (OSError, subprocess.TimeoutExpired):
@@ -196,7 +344,8 @@ class WprRecording:
     def marker(self, marker: str):
         if self.owned and marker in ("RRV_COLD_BEGIN", "RRV_COLD_END"):
             try:
-                run_private([self.executable, "-marker", marker], timeout=12)
+                run_private([self.executable, "-marker", marker], timeout=12,
+                            stage="capture-marker")
             except (OSError, subprocess.TimeoutExpired):
                 pass
 
@@ -204,7 +353,8 @@ class WprRecording:
         if not self.owned:
             return self.status
         try:
-            result = run_private([self.executable, "-stop", str(etl_path), "-skipPdbGen"], timeout=240)
+            result = run_private([self.executable, "-stop", str(etl_path), "-skipPdbGen"],
+                                 timeout=240, stage="capture-stop-save")
             self.status = "saved" if result.returncode == 0 and etl_path.is_file() else "stop-failed"
         except (OSError, subprocess.TimeoutExpired):
             self.status = "stop-unconfirmed"
@@ -217,7 +367,8 @@ class WprRecording:
         if not self.owned:
             return
         try:
-            run_private([self.executable, "-cancel"], timeout=40)
+            run_private([self.executable, "-cancel"], timeout=40,
+                            stage="capture-cancel-owned")
         except (OSError, subprocess.TimeoutExpired):
             self.status = "cancel-unconfirmed"
         finally:
@@ -370,6 +521,8 @@ def validate_home_and_deno():
 
 
 def run_preflight():
+    _progress("START", "preflight begins; all stages will report progress")
+    _progress("START", "maximum combined WPR wait budget: " + str(round(PREFLIGHT_OVERALL_TIMEOUT)) + "s")
     service, home, deno, valid = validate_home_and_deno()
     if valid != "ready":
         print("PREFLIGHT: BLOCKED (" + valid + ")")
@@ -388,6 +541,12 @@ def run_preflight():
     print("WPA analyzer installed:", "yes" if report.wpa_available else "no")
     print("WPR recording profiles:", ", ".join(report.profiles) if report.profiles else "unavailable")
     print("Preflight result:", report.reason)
+    if not report.ok:
+        # An older preflight marker must not allow capture after a failed check.
+        try:
+            (folder / "preflight.json").unlink(missing_ok=True)
+        except OSError:
+            _progress("RESULT", "could not invalidate old marker; do NOT capture")
     if report.ok:
         save_preflight(report, folder)
         print("PREFLIGHT: READY. Next normal power-on may run --capture once.")

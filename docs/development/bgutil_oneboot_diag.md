@@ -45,6 +45,65 @@ Windows Performance Analyzer (WPA) is necessary for detailed file,
 thread-wait and minifilter attribution. The goal is to preserve the decisive
 cold-start evidence **once**, then analyze it later **without further boots**.
 
+## Preflight reliability revision (Stage03.10.1)
+
+The first Windows preflight attempt on November 1, 2026 was interrupted after
+more than three minutes without any screen output; a separate `wpr -status`
+reported `WPR is not recording`. The original implementation waited silently
+inside `subprocess.run(..., stdout=PIPE, stderr=PIPE)` for each WPR step. It is
+**not proven** whether an inherited output pipe, WPR save work, or another
+Windows issue caused the wait.
+
+This revision addresses several independent failure modes in one change:
+
+- Visible phase messages appear **before** every WPR step, followed by a
+  completion or timeout message. A running command reports a safe heartbeat
+  about every five seconds. **No raw WPR output, paths or command lines** are
+  printed by the progress reporter.
+- WPR stdout and stderr use a temporary private file rather than pipes;
+  the parent waits only for the command's **own process**, avoiding waits on
+  grandchildren that inherited pipe handles. Raw command output is discarded
+  immediately after any required profile/status parsing.
+- Each command has a deadline, with a combined WPR preflight budget of about
+  **175 seconds**. Stuck direct child processes and their descendants are
+  terminated; this is distinct from cancelling an actual WPR recording.
+- The script first verifies WPR is **not already recording**. An unknown
+  status fails closed. If optional profile combinations fail and the system
+  is **verified idle**, the core `CPU`, `DiskIO` and `FileIO` profiles are tried.
+  A failed or timed-out `-start` does **not** grant ownership and never
+  automatically cancels another WPR session.
+- After a confirmed successful start, a failed `-stop` attempts cancellation
+  **only if** status confirms an active recording. Cancellation itself must
+  succeed and the status must become idle, otherwise preflight remains
+  blocked. The temporary ETL is not uploaded or retained.
+- A successful `-stop` must create a nonempty ETL, followed by an **idle**
+  status. Only then is the preflight authorization marker written. Markers
+  from before this revision are invalid; a failed rerun invalidates its
+  previous marker as well.
+
+Five normal progress steps appear as:
+
+```text
+[WPR 1/5 status-before] starting ...
+[WPR 2/5 profile-list] starting ...
+[WPR 3/5 test-start] starting ...
+[WPR 4/5 test-stop-save] starting ...
+[WPR 5/5 status-after] starting ...
+PREFLIGHT: READY. Next normal power-on may run --capture once.
+```
+
+Failure codes such as `wpr-existing-or-unverified-session-do-not-cancel`,
+`wpr-start-timeout-ownership-uncertain-check-status`,
+`wpr-stop-save-not-verified` and
+`wpr-owned-trace-cleanup-unconfirmed` indicate different recovery paths.
+Do not reboot for this experiment unless **PREFLIGHT: READY** is printed.
+If it still waits longer than expected, copy the last visible `[WPR ...]`
+line and the output of `wpr -status` in another elevated PowerShell. Do not
+run `wpr -cancel` unless trace ownership is established. On Ctrl+C the tool
+returns a fixed interrupted status rather than leaving a silent ambiguous
+failure. The test uses Windows' installed WPR; the Linux test suite verifies
+command lifecycle with a simulated WPR, **not** actual Windows 26100 behavior.
+
 ## Step 1: PRE-FLIGHT while Windows is already running (no reboot yet)
 
 Update GitHub Desktop to `develop/1.6.0`. Close RR-V including its tray
@@ -73,8 +132,10 @@ Only when the screen says exactly:
 
 `PREFLIGHT: READY. Next normal power-on may run --capture once.`
 
-is the valuable reboot test ready. If it says `NOT READY`, **do not reboot**
-for this experiment. Preserve that result; do not disable security software,
+is the valuable reboot test ready. The revised preflight prints progress
+while it runs: the largest normal step is the test ETL save (up to **90
+seconds**); other steps also show timeouts and safe heartbeat messages.
+If it says `NOT READY`, **do not reboot** for this experiment. Preserve that result; do not disable security software,
 restart services or blindly use `wpr -cancel` (a different program may own
 a session). If stop or cancellation is unconfirmed, inspect `wpr -status`
 and report that, not the raw system trace.
