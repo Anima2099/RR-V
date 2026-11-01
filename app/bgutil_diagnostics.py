@@ -26,6 +26,7 @@ _ALLOWED_FIELDS = frozenset({
     "token_source", "chrome_signal",
     "phase", "startup_ms", "ping_attempts", "output_kind", "first_output_ms",
     "parent_pid", "order", "wall_ms", "launcher_pid",
+    "attempt", "announced_ms", "tcp_ms", "ping_ms", "tcp_checks", "worst_ping_ms",
 })
 
 
