@@ -77,7 +77,7 @@
 
 | 다크 모드 | 미디어 도구 |
 | :---: | :---: |
-| ![RR-V 다크 모드](docs/images/rrv-dark.jpg) | ![RR-V 미디어 도구](docs/images/rrv-tools.jpg) |
+| ![RR-V 다크 모드](docs/images/rrv-dark-v150.jpg) | ![RR-V 미디어 도구](docs/images/rrv-tools.jpg) |
 
 > 일부 스크린샷은 이전 버전의 화면을 포함할 수 있습니다. 현재 기능과 메뉴 구조는 아래 안내를 기준으로 확인해 주세요.
 
