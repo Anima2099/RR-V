@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import redirect_stdout
+import hashlib
 import importlib.util
 import io
 import json
@@ -133,7 +134,7 @@ class CompileProbeTests(unittest.TestCase):
         self.assertTrue((self.source / "server" / "src" / "main.ts").exists())
 
     def test_build_cli_reports_exit_code_and_safe_reason_only(self):
-        error = b"error: Specifier not found in cache: https://example.invalid/?token=SECRET\n"
+        error = b"error: Specifier not found in cache: 'https://jsr.io/private/path?token=SECRET'\n"
         error += b"    at C:\\Users\\Private\\main.ts:1:1\n"
         failure = subprocess.CompletedProcess([], 1, stderr=error)
         output = io.StringIO()
@@ -147,9 +148,43 @@ class CompileProbeTests(unittest.TestCase):
         ):
             self.assertEqual(PROBE.main(["--build"]), 1)
         self.assertEqual(output.getvalue().splitlines(), [
-            "BGUTIL P3 BUILD: compile-failed | exit_code=1 | reason=dependency-cache-error | variant=bundled",
+            "BGUTIL P3 BUILD: compile-failed | exit_code=1 | reason=dependency-cache-error"
+            " | cache_ref=jsr.io | variant=bundled",
             "Original BgUtils and RR-V production runtime were not modified.",
         ])
+
+    def test_cache_miss_reports_public_windows_bundler_package_without_version(self):
+        stderr = (
+            b"error: bundling failed\n"
+            b"Caused by: Error getting response at https://private.example/token/SECRET: "
+            b"An npm specifier not found in cache: \"@esbuild/win32-x64@0.25.5\", --cached-only is specified."
+        )
+        self.assertEqual(PROBE._cache_miss_reference(stderr, self.root / "missing.lock"), "npm:@esbuild/win32-x64")
+
+    def test_cache_miss_only_identifies_packages_in_verified_public_lock(self):
+        lockfile = self.root / "deno.lock"
+        lock = b'{\n  "npm": {"@types/node@26.6.4": {}}\n}\n'
+        lockfile.write_bytes(lock.replace(b"\n", b"\r\n"))
+        known = b"error: npm package not found in cache: '@types/node@26.6.4/private'"
+        private = b"error: npm package not found in cache: '@private/internal'"
+        with patch.object(PROBE, "PUBLIC_LOCK_SHA256", hashlib.sha256(lock).hexdigest()):
+            self.assertEqual(PROBE._cache_miss_reference(known, lockfile), "npm:@types/node")
+            self.assertEqual(PROBE._cache_miss_reference(private, lockfile), "npm")
+            lockfile.write_bytes(b'{"npm":{"@private/internal@1.0.0":{}}}')
+            self.assertEqual(PROBE._cache_miss_reference(private, lockfile), "npm")
+            self.assertEqual(PROBE._cache_miss_reference(known, lockfile), "npm")
+
+    def test_cache_miss_hides_private_hosts_credentials_and_local_paths(self):
+        for reference, expected in (
+            (b"https://private.example/internal", "remote"),
+            (b"https://jsr.io@private.example/internal", "remote"),
+            (b"https://private:secret@jsr.io/internal", "remote"),
+            (b"file:///C:/Users/Private/source.ts", "unavailable"),
+            (b"C:\\Users\\Private\\main.ts", "unavailable"),
+        ):
+            with self.subTest(reference=reference):
+                stderr = b"Specifier not found in cache: \"" + reference + b"\""
+                self.assertEqual(PROBE._cache_miss_reference(stderr, self.root / "missing.lock"), expected)
 
     def test_compile_failure_uses_only_fixed_reasons(self):
         for stderr, expected in (

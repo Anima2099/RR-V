@@ -19,6 +19,7 @@ import subprocess
 import sys
 import time
 from urllib.error import URLError
+from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -38,6 +39,11 @@ BUILD_TIMEOUT = 360
 PROBE_TIMEOUT = 70.0
 PRODUCTION_FIRST_BUDGET_MS = 18_000
 MIN_FREE_BYTES = 512 * 1024 * 1024
+# server/deno.lock from bgutil.SOURCE_COMMIT, normalized to LF.
+PUBLIC_LOCK_SHA256 = "5b251ee1b127499e72b8faf9f6a9cee36b6d8dc3970bc8249e58f6f840550c59"
+PUBLIC_DEPENDENCY_HOSTS = ("registry.npmjs.org", "jsr.io", "deno.land", "esm.sh")
+# Deno's bundler fetches these independently of BgUtils's lockfile.
+PUBLIC_WINDOWS_BUNDLER_PACKAGES = ("@esbuild/win32-x64", "@esbuild/win32-arm64")
 
 
 def paths_for(local_appdata: Path, variant: str) -> tuple[Path, Path]:
@@ -149,6 +155,42 @@ def _compile_failure_reason(stderr: bytes) -> str:
     return "unclassified"
 
 
+def _cache_miss_reference(stderr: bytes, lockfile: Path) -> str:
+    """Report only a pinned public package name or known public host."""
+    match = re.search(
+        r"\b(?P<npm>npm )?(?:package|specifier|module) not found in (?:the )?cache:"
+        r"[ \t]*[\"']?(?P<reference>[^\s,\"']+)",
+        stderr.decode("utf-8", errors="replace"),
+        re.IGNORECASE,
+    )
+    if not match:
+        return "unavailable"
+    reference = match["reference"]
+    if reference.startswith(("https://", "http://")):
+        try:
+            host = urlsplit(reference).netloc.lower()
+        except ValueError:
+            return "remote"
+        return host if host in PUBLIC_DEPENDENCY_HOSTS else "remote"
+    if not match["npm"] and not reference.startswith("npm:"):
+        return "unavailable"
+    package = re.match(r"(?:npm:)?((?:@[a-z0-9_.-]+/)?[a-z0-9_.-]+)(?=[@/]|$)", reference)
+    if not package:
+        return "npm"
+    name = package[1]
+    if name in PUBLIC_WINDOWS_BUNDLER_PACKAGES:
+        return f"npm:{name}"
+    try:
+        with lockfile.open("rb") as stream:
+            data = stream.read(128 * 1024).replace(b"\r\n", b"\n")
+        if hashlib.sha256(data).hexdigest() == PUBLIC_LOCK_SHA256:
+            if any(key.startswith(name + "@") for key in json.loads(data)["npm"]):
+                return f"npm:{name}"
+    except OSError:
+        pass
+    return "npm"
+
+
 def build(source: Path, target: Path, deno: Path | None, variant: str) -> str:
     """Compile to a new, fixed, diagnostics-only directory; never overwrite."""
     if variant not in VARIANTS:
@@ -192,7 +234,11 @@ def build(source: Path, target: Path, deno: Path | None, variant: str) -> str:
             )
             if result.returncode:
                 reason = _compile_failure_reason(result.stderr)
-                return f"compile-failed | exit_code={result.returncode} | reason={reason}"
+                summary = f"compile-failed | exit_code={result.returncode} | reason={reason}"
+                if reason == "dependency-cache-error":
+                    reference = _cache_miss_reference(result.stderr, source / "server" / "deno.lock")
+                    summary += f" | cache_ref={reference}"
+                return summary
             if not output.is_file() or output.stat().st_size < 1:
                 return "compiled-binary-missing"
             metadata = _compiled_marker(variant, output)
