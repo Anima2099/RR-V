@@ -1,7 +1,9 @@
 """Stage03 P3 mock tests; no Deno compilation, network or token requests."""
 from __future__ import annotations
 
+from contextlib import redirect_stdout
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -75,7 +77,7 @@ class CompileProbeTests(unittest.TestCase):
         self.assertNotIn("--allow-all", command)
         self.assertEqual(kwargs["stdin"], PROBE.subprocess.DEVNULL)
         self.assertEqual(kwargs["stdout"], PROBE.subprocess.DEVNULL)
-        self.assertEqual(kwargs["stderr"], PROBE.subprocess.DEVNULL)
+        self.assertEqual(kwargs["stderr"], PROBE.subprocess.PIPE)
         self.assertEqual(kwargs["cwd"], str(self.source / "server" / "node_modules"))
         self.assertEqual(kwargs["env"]["DENO_DIR"], str(self.source / "deno-cache"))
         output = Path(command[command.index("--output") + 1])
@@ -123,11 +125,45 @@ class CompileProbeTests(unittest.TestCase):
         self.assertFalse(self.target.exists())
 
     def test_failed_compile_removes_only_new_candidate(self):
-        with patch.object(PROBE.subprocess, "run", return_value=types.SimpleNamespace(returncode=1)):
+        failure = subprocess.CompletedProcess([], 2, stderr=b"error: unexpected argument '--bundle' found")
+        with patch.object(PROBE.subprocess, "run", return_value=failure):
             status = PROBE.build(self.source, self.target, self.deno, "bundled")
-        self.assertEqual(status, "compile-failed")
+        self.assertEqual(status, "compile-failed | exit_code=2 | reason=unsupported-cli-option:--bundle")
         self.assertFalse(self.target.exists())
         self.assertTrue((self.source / "server" / "src" / "main.ts").exists())
+
+    def test_build_cli_reports_exit_code_and_safe_reason_only(self):
+        error = b"error: Specifier not found in cache: https://example.invalid/?token=SECRET\n"
+        error += b"    at C:\\Users\\Private\\main.ts:1:1\n"
+        failure = subprocess.CompletedProcess([], 1, stderr=error)
+        output = io.StringIO()
+        windows = types.SimpleNamespace(name="nt", environ={"LOCALAPPDATA": str(self.root)})
+        with (
+            patch.object(PROBE, "os", windows),
+            patch.object(PROBE, "paths_for", return_value=(self.source, self.target)),
+            patch.object(PROBE, "find_executable", return_value=self.deno),
+            patch.object(PROBE.subprocess, "run", return_value=failure),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(PROBE.main(["--build"]), 1)
+        self.assertEqual(output.getvalue().splitlines(), [
+            "BGUTIL P3 BUILD: compile-failed | exit_code=1 | reason=dependency-cache-error | variant=bundled",
+            "Original BgUtils and RR-V production runtime were not modified.",
+        ])
+
+    def test_compile_failure_uses_only_fixed_reasons(self):
+        for stderr, expected in (
+            (b"", "no-stderr"),
+            (b"unexpected argument '--private-value' found", "unsupported-cli-option"),
+            (b"The lockfile is out of date.", "lockfile-error"),
+            (b"Access is denied. (os error 5)", "access-denied"),
+            (b"Could not resolve './build/Release/canvas.node'", "native-addon-error"),
+            (b"Failed to download https://example.invalid/", "download-error"),
+            (b"Module not found 'file:///private/source.ts'", "module-resolution-error"),
+            (b"unknown failure with private value \xff", "unclassified"),
+        ):
+            with self.subTest(expected=expected):
+                self.assertEqual(PROBE._compile_failure_reason(stderr), expected)
 
     def test_timeout_has_only_safe_status_and_cleans(self):
         err = subprocess.TimeoutExpired("PRIVATE_PATH", 360, output=b"SECRET")

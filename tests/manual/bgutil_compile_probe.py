@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
 import subprocess
@@ -124,6 +125,30 @@ def _looks_prepared(target: Path, variant: str, *, hash_file: bool = False) -> b
         return False
 
 
+def _compile_failure_reason(stderr: bytes) -> str:
+    """Classify known Deno errors without copying any compiler output."""
+    message = stderr.decode("utf-8", errors="replace").lower()
+    if not message.strip():
+        return "no-stderr"
+    invalid_option = re.search(r"(?:unexpected|unknown) (?:argument|option)\s+['`\"]?(--[\w-]+)", message)
+    if invalid_option:
+        option = invalid_option[1]
+        if option in ("--bundle", "--cached-only", "--frozen-lockfile", "--node-modules-dir", "--self-extracting"):
+            return f"unsupported-cli-option:{option}"
+        return "unsupported-cli-option"
+    for pattern, reason in (
+        (r"lockfile.*(?:out of date|frozen|integrity|version)|(?:frozen|invalid).*lockfile", "lockfile-error"),
+        (r"not (?:found in (?:the )?cache|cached)", "dependency-cache-error"),
+        (r"permission denied|access is denied|os error 5\b", "access-denied"),
+        (r"native (?:addon|module)|napi|\.node\b", "native-addon-error"),
+        (r"failed to download|error downloading", "download-error"),
+        (r"module not found|cannot find (?:module|package)|could not resolve", "module-resolution-error"),
+    ):
+        if re.search(pattern, message):
+            return reason
+    return "unclassified"
+
+
 def build(source: Path, target: Path, deno: Path | None, variant: str) -> str:
     """Compile to a new, fixed, diagnostics-only directory; never overwrite."""
     if variant not in VARIANTS:
@@ -161,12 +186,13 @@ def build(source: Path, target: Path, deno: Path | None, variant: str) -> str:
                 env=environment,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
                 timeout=BUILD_TIMEOUT,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             if result.returncode:
-                return "compile-failed"
+                reason = _compile_failure_reason(result.stderr)
+                return f"compile-failed | exit_code={result.returncode} | reason={reason}"
             if not output.is_file() or output.stat().st_size < 1:
                 return "compiled-binary-missing"
             metadata = _compiled_marker(variant, output)
