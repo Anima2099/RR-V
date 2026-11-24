@@ -57,6 +57,11 @@ class CompileProbeTests(unittest.TestCase):
         (self.source / "server" / "src").mkdir()
         (self.source / "server" / "src" / "main.ts").write_text("export {}", encoding="utf-8")
         (self.source / "server" / "node_modules" / "source-keep.txt").write_text("unchanged")
+        (self.source / "deno-cache").mkdir()
+        (self.source / "deno-cache" / "source-keep.txt").write_text("unchanged")
+        self.cache = self.root / PROBE.BUNDLER_CACHE_NAME
+        (self.cache / "deno-cache").mkdir(parents=True)
+        (self.cache / PROBE.BUNDLER_MARKER).write_text(PROBE.bgutil.SOURCE_COMMIT, encoding="ascii")
         (self.source / PROBE.LEAN_MARKER).write_text(json.dumps({
             "schema": 1,
             "source_commit": PROBE.bgutil.SOURCE_COMMIT,
@@ -80,7 +85,7 @@ class CompileProbeTests(unittest.TestCase):
         self.assertEqual(kwargs["stdout"], PROBE.subprocess.DEVNULL)
         self.assertEqual(kwargs["stderr"], PROBE.subprocess.PIPE)
         self.assertEqual(kwargs["cwd"], str(self.source / "server" / "node_modules"))
-        self.assertEqual(kwargs["env"]["DENO_DIR"], str(self.source / "deno-cache"))
+        self.assertEqual(kwargs["env"]["DENO_DIR"], str(self.cache / "deno-cache"))
         output = Path(command[command.index("--output") + 1])
         self.assertEqual(output, self.target / PROBE.binary_name("bundled"))
         output.write_bytes(b"compiled candidate")
@@ -123,6 +128,46 @@ class CompileProbeTests(unittest.TestCase):
 
     def test_missing_deno_is_rejected(self):
         self.assertEqual(PROBE.build(self.source, self.target, None, "bundled"), "deno-missing")
+        self.assertFalse(self.target.exists())
+
+    def test_bundler_preparation_copies_cache_and_only_bundles_local_fixture(self):
+        (self.cache / PROBE.BUNDLER_MARKER).unlink()
+        (self.cache / "deno-cache").rmdir()
+        self.cache.rmdir()
+
+        def bundle(command, *, cwd, env, **kwargs):
+            self.assertEqual(command, [str(self.deno), "bundle", "--no-config", "--no-lock",
+                                       "--node-modules-dir=none", "main.ts"])
+            self.assertEqual(env["DENO_DIR"], str(self.cache / "deno-cache"))
+            self.assertEqual((cwd / "main.ts").read_text(), "export const ready = true;\n")
+            cached = self.cache / "deno-cache" / "source-keep.txt"
+            self.assertEqual(cached.read_text(), "unchanged")
+            cached.write_text("only in P3")
+            return subprocess.CompletedProcess(command, 0)
+
+        with patch.object(PROBE.subprocess, "run", side_effect=bundle) as execute:
+            self.assertEqual(PROBE.prepare_bundler(self.source, self.cache, self.deno), "prepared")
+            self.assertEqual(PROBE.prepare_bundler(self.source, self.cache, self.deno), "already-prepared")
+            execute.assert_called_once()
+        self.assertEqual((self.source / "deno-cache" / "source-keep.txt").read_text(), "unchanged")
+        self.assertEqual(self.build_ok(), "built")
+
+    def test_bundler_failure_cleans_new_cache_and_masks_error(self):
+        cache = self.root / "new-cache"
+        failure = subprocess.CompletedProcess([], 1, stderr=b"failed to download https://secret.example/x")
+        with patch.object(PROBE.subprocess, "run", return_value=failure):
+            status = PROBE.prepare_bundler(self.source, cache, self.deno)
+        self.assertEqual(status, "bundle-failed | exit_code=1 | reason=download-error")
+        self.assertFalse(cache.exists())
+        self.assertTrue((self.source / "deno-cache" / "source-keep.txt").is_file())
+
+    def test_unprepared_cache_prevents_compile_and_is_not_overwritten(self):
+        (self.cache / PROBE.BUNDLER_MARKER).unlink()
+        with patch.object(PROBE.subprocess, "run") as execute:
+            self.assertEqual(PROBE.build(self.source, self.target, self.deno, "bundled"), "bundler-not-prepared")
+            self.assertEqual(PROBE.prepare_bundler(self.source, self.cache, self.deno), "cache-exists-unverified")
+            execute.assert_not_called()
+        self.assertTrue(self.cache.is_dir())
         self.assertFalse(self.target.exists())
 
     def test_failed_compile_removes_only_new_candidate(self):

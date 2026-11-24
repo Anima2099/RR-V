@@ -32,13 +32,16 @@ separate, explicitly approved follow-up test.
 - The existing `%LOCALAPPDATA%\RR-V\bgutil-stage03-external` installation and
   production RR-V launcher are not changed. No Stage03 home environment
   variable is changed by this script.
-- No dependency download (`--cached-only`) or lockfile changes
-  (`--frozen-lockfile`) are intended. Build uses the lean experiment's
-  existing Deno cache and manual node_modules layout.
+- `--prepare-bundler` copies the lean Deno cache to
+  `%LOCALAPPDATA%\RR-V\diagnostics\bgutil-stage03-p3-cache` and bundles a
+  dependency-free TypeScript file so Deno can obtain its esbuild helper there.
+  This is the opt-in network step. The original P2 cache is read only.
+- `--build` uses the prepared P3 cache and the lean manual node_modules
+  layout with `--cached-only` and `--frozen-lockfile`.
 - Compilation may be CPU-, disk- and memory-intensive and may fail because
   native addons are not compatible with bundling. Compilation failures are
   expected experimental outcomes, not grounds to change antivirus settings.
-- No YouTube access, PO Tokens, WPC, Chrome, downloads, stored cookies, or
+- No YouTube access, PO Tokens, WPC, Chrome, video downloads, stored cookies, or
   global Windows startup settings are used.
 - On a nonzero compile exit, the build reports Deno's exit code and a fixed
   error category derived from stderr. A dependency cache error also reports
@@ -57,6 +60,15 @@ separate, explicitly approved follow-up test.
 2. From the RR-V repository in the VS Code terminal, run:
 
    ```powershell
+   .\.venv\Scripts\python.exe .\tests\manual\bgutil_compile_probe.py --prepare-bundler
+   ```
+
+   Continue when `BGUTIL P3 PREPARE` reports `prepared` or `already-prepared`.
+   If preparation fails, send that status line and stop.
+
+3. Build the candidate:
+
+   ```powershell
    .\.venv\Scripts\python.exe .\tests\manual\bgutil_compile_probe.py --build
    ```
 
@@ -66,7 +78,7 @@ separate, explicitly approved follow-up test.
    Do not delete the lean or original provider, retry with different flags,
    or disable security software.
 
-3. If the build succeeds, run:
+4. If the build succeeds, run:
 
    ```powershell
    .\.venv\Scripts\python.exe .\tests\manual\bgutil_compile_probe.py --probe
@@ -78,7 +90,7 @@ separate, explicitly approved follow-up test.
    within the diagnostic's 70-second limit. `compiled-exited-before-ready:code=N`,
    `compiled-timeout`, or `compiled-launch-error` indicate a failed probe.
 
-4. Send the two status lines or a screenshot of the whole terminal result.
+5. Send the status lines or a screenshot of the whole terminal result.
    No extra log files or ETL trace are required initially.
 
 Optional file hash validation (not for timing):

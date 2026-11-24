@@ -17,6 +17,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from urllib.error import URLError
 from urllib.parse import urlsplit
@@ -36,6 +37,9 @@ VARIANTS = ("bundled", "extracted")
 MARKER_NAME = "rrv-p3-compiled.json"
 LEAN_MARKER = "rrv-lean-experiment.json"
 BUILD_TIMEOUT = 360
+BUNDLER_TIMEOUT = 120
+BUNDLER_CACHE_NAME = "bgutil-stage03-p3-cache"
+BUNDLER_MARKER = "rrv-p3-bundler-ready"
 PROBE_TIMEOUT = 70.0
 PRODUCTION_FIRST_BUDGET_MS = 18_000
 MIN_FREE_BYTES = 512 * 1024 * 1024
@@ -71,6 +75,74 @@ def _is_lean_source(source: Path) -> bool:
         } and bgutil._validate_external_home(source)
     except (OSError, ValueError, TypeError):
         return False
+
+
+def _deno_environment(cache: Path) -> dict[str, str]:
+    return {
+        **os.environ,
+        "DENO_DIR": str(cache),
+        "DENO_NO_PROMPT": "1",
+        "DENO_NO_UPDATE_CHECK": "1",
+        "FORCE_COLOR": "false",
+    }
+
+
+def _bundler_ready(cache: Path) -> bool:
+    try:
+        deno_cache = cache / "deno-cache"
+        return (
+            deno_cache.resolve() == deno_cache.absolute()
+            and deno_cache.is_dir()
+            and (cache / BUNDLER_MARKER).read_text(encoding="ascii") == bgutil.SOURCE_COMMIT
+        )
+    except (OSError, UnicodeError):
+        return False
+
+
+def prepare_bundler(source: Path, cache: Path, deno: Path | None) -> str:
+    """Warm Deno's esbuild helper using a standalone, dependency-free input."""
+    try:
+        source = source.resolve()
+        resolved_cache = cache.resolve()
+        if source.is_relative_to(resolved_cache) or resolved_cache.is_relative_to(source):
+            return "source-target-overlap"
+        if not _is_lean_source(source):
+            return "lean-source-unverified"
+        if deno is None or not deno.is_file():
+            return "deno-missing"
+        source_cache = source / "deno-cache"
+        if not source_cache.is_dir():
+            return "lean-cache-missing"
+        try:
+            cache.mkdir(parents=False)
+        except FileExistsError:
+            return "already-prepared" if _bundler_ready(cache) else "cache-exists-unverified"
+        prepared = False
+        try:
+            deno_cache = cache / "deno-cache"
+            shutil.copytree(source_cache, deno_cache)
+            with tempfile.TemporaryDirectory(dir=cache) as temporary:
+                workdir = Path(temporary)
+                (workdir / "main.ts").write_text("export const ready = true;\n", encoding="utf-8")
+                result = subprocess.run(
+                    [str(deno), "bundle", "--no-config", "--no-lock", "--node-modules-dir=none", "main.ts"],
+                    cwd=workdir, env=_deno_environment(deno_cache),
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                    timeout=BUNDLER_TIMEOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            if result.returncode:
+                reason = _compile_failure_reason(result.stderr)
+                return f"bundle-failed | exit_code={result.returncode} | reason={reason}"
+            (cache / BUNDLER_MARKER).write_text(bgutil.SOURCE_COMMIT, encoding="ascii")
+            prepared = True
+            return "prepared"
+        except subprocess.TimeoutExpired:
+            return "bundle-timeout"
+        finally:
+            if not prepared:
+                shutil.rmtree(cache, ignore_errors=True)
+    except (OSError, ValueError):
+        return "prepare-setup-failed"
 
 
 def compile_command(deno: Path, output: Path, variant: str) -> list[str]:
@@ -206,6 +278,9 @@ def build(source: Path, target: Path, deno: Path | None, variant: str) -> str:
             return "lean-source-unverified"
         if deno is None or not deno.is_file():
             return "deno-missing"
+        cache = target.parent / BUNDLER_CACHE_NAME
+        if not _bundler_ready(cache):
+            return "bundler-not-prepared"
         if shutil.disk_usage(target.parent.parent).free < MIN_FREE_BYTES:
             return "insufficient-free-space"
         try:
@@ -215,17 +290,10 @@ def build(source: Path, target: Path, deno: Path | None, variant: str) -> str:
         succeeded = False
         try:
             output = target / binary_name(variant)
-            environment = os.environ.copy()
-            environment.update({
-                "DENO_DIR": str(source / "deno-cache"),
-                "DENO_NO_PROMPT": "1",
-                "DENO_NO_UPDATE_CHECK": "1",
-                "FORCE_COLOR": "false",
-            })
             result = subprocess.run(
                 compile_command(deno, output, variant),
                 cwd=str(source / "server" / "node_modules"),
-                env=environment,
+                env=_deno_environment(cache / "deno-cache"),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -338,6 +406,7 @@ def probe(target: Path, variant: str, *, timeout: float = PROBE_TIMEOUT) -> tupl
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Stage03 P3 isolated Deno bundle/compile experiment")
     action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--prepare-bundler", action="store_true", help="Prepare esbuild in the isolated P3 cache")
     action.add_argument("--build", action="store_true", help="Compile a separate candidate once")
     action.add_argument("--probe", action="store_true", help="Probe an existing candidate without pre-warming it")
     action.add_argument("--verify", action="store_true", help="Hash-check existing compiled file")
@@ -348,6 +417,10 @@ def main(argv: list[str] | None = None) -> int:
         print("BGUTIL P3: requires-windows-localappdata")
         return 2
     source, target = paths_for(Path(local), args.variant)
+    if args.prepare_bundler:
+        status = prepare_bundler(source, target.parent / BUNDLER_CACHE_NAME, find_executable("deno.exe"))
+        print(f"BGUTIL P3 PREPARE: {status}")
+        return 0 if status in ("prepared", "already-prepared") else 1
     if args.build:
         status = build(source, target, find_executable("deno.exe"), args.variant)
         print(f"BGUTIL P3 BUILD: {status} | variant={args.variant}")
