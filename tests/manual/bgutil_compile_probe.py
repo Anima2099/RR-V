@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
-from datetime import datetime, timezone
+import ctypes
+from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import platform
 import re
+import runpy
 import shutil
 import socket
 import subprocess
@@ -23,7 +26,7 @@ import sys
 import tempfile
 import threading
 import time
-from typing import BinaryIO
+from typing import BinaryIO, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
@@ -46,6 +49,7 @@ BUNDLER_TIMEOUT = 120
 BUNDLER_CACHE_NAME = "bgutil-stage03-p3-cache"
 BUNDLER_MARKER = "rrv-p3-bundler-ready"
 PROBE_TIMEOUT = 70.0
+TOKEN_PROBE_TIMEOUT = 150
 PROBE_LOG_STREAM_LIMIT = 256 * 1024
 PROBE_LOG_TAIL_LIMIT = 32 * 1024
 PRODUCTION_FIRST_BUDGET_MS = 18_000
@@ -406,6 +410,7 @@ class _ProbeTrace:
         self.started_at = datetime.now(timezone.utc).isoformat()
         self.start = time.monotonic()
         self.lock = threading.Lock()
+        self.capture_enabled = True
         self.events: list[str] = []
         self.streams = {"stdout": bytearray(), "stderr": bytearray()}
         self.overflow = {"stdout": bytearray(), "stderr": bytearray()}
@@ -421,6 +426,8 @@ class _ProbeTrace:
 
     def capture(self, channel: str, block: bytes, *, live: bool = True) -> None:
         with self.lock:
+            if not self.capture_enabled:
+                return
             if live and block and not self.received[channel]:
                 self._record(f"first {channel} bytes")
             self.received[channel] += len(block)
@@ -431,6 +438,10 @@ class _ProbeTrace:
                 tail = self.overflow[channel]
                 tail.extend(block[max(remaining, len(block) - PROBE_LOG_TAIL_LIMIT):])
                 del tail[:-PROBE_LOG_TAIL_LIMIT]
+
+    def stop_capture(self) -> None:
+        with self.lock:
+            self.capture_enabled = False
 
     def render(self, variant: str, status: str, elapsed: int, attempts: int | None) -> str:
         with self.lock:
@@ -493,13 +504,22 @@ def _probe_failure_reason(stderr: bytes) -> str:
 
 def probe(
     target: Path, variant: str, *, timeout: float = PROBE_TIMEOUT, trace: _ProbeTrace | None = None,
+    after_ready: Callable[[str], None] | None = None,
 ) -> tuple[str, int, int]:
     """Launch only the compiled file from an isolated cwd. No source pre-run."""
     if variant not in VARIANTS:
         return "unsupported-variant", 0, 0
     if not _looks_prepared(target, variant, hash_file=False):
         return "not-built-or-invalid", 0, 0
-    binary = target / binary_name(variant)
+    return _probe_server([str(target / binary_name(variant))], target, timeout=timeout,
+                         trace=trace, after_ready=after_ready)
+
+
+def _probe_server(
+    command: list[str], cwd: Path, *, timeout: float = PROBE_TIMEOUT,
+    trace: _ProbeTrace | None = None, after_ready: Callable[[str], None] | None = None,
+    env: dict[str, str] | None = None, kind: str = "compiled",
+) -> tuple[str, int, int]:
     try:
         port = _allocate_port()
     except OSError:
@@ -514,8 +534,8 @@ def probe(
     try:
         record("launch requested")
         process = subprocess.Popen(
-            [str(binary), "--host", "127.0.0.1", "--port", str(port)],
-            cwd=str(target),  # Never rely on an ambient node_modules cwd.
+            [*command, "--host", "127.0.0.1", "--port", str(port)],
+            cwd=str(cwd), env=env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE if trace is not None else subprocess.DEVNULL,
             stderr=subprocess.PIPE,
@@ -539,7 +559,7 @@ def probe(
                 for reader in readers:
                     reader.join(timeout=0.2)
                 reason = _probe_failure_reason(b"".join(stderr_tail.copy()))
-                status = f"compiled-exited-before-ready:code={int(code)} | reason={reason}"
+                status = f"{kind}-exited-before-ready:code={int(code)} | reason={reason}"
                 return status, elapsed, attempts
             attempts += 1
             record(f"ping {attempts} started")
@@ -547,12 +567,16 @@ def probe(
             record(f"ping {attempts}: {ping_status}")
             if ping_status == "ready":
                 elapsed = round((time.monotonic() - start) * 1000)
+                if after_ready is not None:
+                    if trace is not None:
+                        trace.stop_capture()
+                    after_ready(url)
                 return ("late-ready" if elapsed > PRODUCTION_FIRST_BUDGET_MS else "ready"), elapsed, attempts
             time.sleep(0.2)
-        return "compiled-timeout", round((time.monotonic() - start) * 1000), attempts
+        return f"{kind}-timeout", round((time.monotonic() - start) * 1000), attempts
     except (OSError, ValueError) as error:
         record(f"launch or probe failed: {type(error).__name__}, os_error={getattr(error, 'winerror', None) or getattr(error, 'errno', None)}")
-        return "compiled-launch-error", round((time.monotonic() - start) * 1000), attempts
+        return f"{kind}-launch-error", round((time.monotonic() - start) * 1000), attempts
     finally:
         if process is not None:
             _terminate(process)
@@ -564,12 +588,14 @@ def probe(
                     record("output stream did not finish draining")
 
 
-def _comparison_metadata(source: Path, deno: Path | None) -> str:
+def _comparison_metadata(source: Path, deno: Path | None, ytdlp: Path | None = None) -> str:
     commands = [
         ("git_commit", ["git", "rev-parse", "HEAD"], rb"(?m)^([a-f0-9]{40,64})\r?$"),
     ]
     if deno is not None:
         commands.append(("deno", [str(deno), "--version"], rb"(?m)^deno ([0-9]+\.[0-9]+\.[0-9]+[\w.+-]*)"))
+    if ytdlp is not None:
+        commands.append(("yt_dlp", [str(ytdlp), "--version"], rb"(?m)^([0-9]+\.[0-9]+\.[0-9]+[\w.+-]*)\r?$"))
     fields = [f"os={platform.system()} {platform.version()} arch={platform.machine()}",
               f"bgutils={bgutil.PROVIDER_VERSION}"]
     for name, command, pattern in commands:
@@ -597,7 +623,6 @@ def _comparison_metadata(source: Path, deno: Path | None) -> str:
             fields.append(f"{package}={','.join(versions) or 'unavailable'}")
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         fields.append("npm_lock_versions=unavailable")
-    fields.append("compile_arguments=" + " ".join(compile_command(Path("deno.exe"), Path("candidate.exe"), "unbundled")[1:]))
     return "\n".join(fields) + "\n"
 
 
@@ -631,6 +656,8 @@ def compare_unbundled(source: Path, target: Path, deno: Path | None) -> int:
             dir=target.parent, delete=False,
         ) as report:
             report.write(_comparison_metadata(source, deno))
+            compile_args = compile_command(Path("deno.exe"), Path("candidate.exe"), "unbundled")[1:]
+            report.write("compile_arguments=" + " ".join(compile_args) + "\n")
             build_trace = _ProbeTrace()
             build_status = build(source, target, deno, "unbundled", trace=build_trace)
             elapsed = round((time.monotonic() - build_trace.start) * 1000)
@@ -653,6 +680,92 @@ def compare_unbundled(source: Path, target: Path, deno: Path | None) -> int:
         return 1
 
 
+def _boot_snapshot() -> str:
+    try:
+        get_uptime = ctypes.windll.kernel32.GetTickCount64
+        get_uptime.restype = ctypes.c_uint64
+        uptime_ms = get_uptime()
+        estimated_boot = datetime.now(timezone.utc) - timedelta(milliseconds=uptime_ms)
+        return f"boot_utc_estimate={estimated_boot.isoformat(timespec='seconds')} uptime_at_start_ms={uptime_ms}\n"
+    except (AttributeError, OSError):
+        return "boot_utc_estimate=unavailable uptime_at_start_ms=unavailable\n"
+
+
+def _verify_live_token(source: Path, base_url: str, ytdlp: Path | None, deno: Path | None) -> tuple[str, dict]:
+    if ytdlp is None or deno is None:
+        return "simulation-tools-missing", {}
+    if not _is_lean_source(source):
+        return "lean-plugin-unverified", {}
+    helpers = runpy.run_path(str(Path(__file__).with_name("bgutil_token_fallback_probe.py")))
+    command = helpers["_build_command"](ytdlp, deno, source, base_url, False, helpers["DEFAULT_VIDEO"])
+    try:
+        completed = subprocess.run(
+            command, stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8", errors="replace",
+            timeout=TOKEN_PROBE_TIMEOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired:
+        return "simulation-timeout", {}
+    except OSError:
+        return "simulation-launch-failed", {}
+    combined = (completed.stdout or "") + "\n" + (completed.stderr or "")
+    signals = helpers["inspect_trace"](combined, completed.returncode)
+    return helpers["classify"]("bgutil", signals), asdict(signals)
+
+
+def cold_check(source: Path, target: Path, mode: str, deno: Path | None, ytdlp: Path | None) -> int:
+    trace = _ProbeTrace()
+    token_status = "skipped-server-not-ready"
+    token_elapsed = None
+    token_details = {}
+
+    def verify_token(base_url: str) -> None:
+        nonlocal token_status, token_elapsed, token_details
+        trace.record("yt-dlp token simulation requested; server output capture stopped")
+        start = time.monotonic()
+        token_status, token_details = _verify_live_token(source, base_url, ytdlp, deno)
+        token_elapsed = round((time.monotonic() - start) * 1000)
+        trace.record(f"yt-dlp token simulation finished: {token_status}")
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", prefix=f"bgutil-p3-cold-{mode}-", suffix=".log",
+            dir=target.parent, delete=False,
+        ) as report:
+            report.write(f"mode={mode} startup_budget_ms={PRODUCTION_FIRST_BUDGET_MS}\n" + _boot_snapshot())
+            report.flush()
+            if mode == "compiled":
+                status, elapsed, attempts = probe(target, "unbundled", trace=trace, after_ready=verify_token)
+            elif deno is None or not deno.is_file():
+                status, elapsed, attempts = "deno-executable-missing", 0, 0
+            elif not _is_lean_source(source):
+                status, elapsed, attempts = "lean-source-unverified", 0, 0
+            else:
+                status, elapsed, attempts = _probe_server(
+                    [str(deno), "run", "--allow-env", "--allow-net", "--allow-ffi=.", "--allow-read=.", "../src/main.ts"],
+                    source / "server" / "node_modules", env=_deno_environment(source / "deno-cache"),
+                    kind="source", trace=trace, after_ready=verify_token,
+                )
+            variant = "unbundled" if mode == "compiled" else "p2-lean-source"
+            report.write(_redact_comparison_report(trace.render(variant, status, elapsed, attempts)))
+            report.write(f"\ntoken_result={token_status}\n")
+            if token_elapsed is not None:
+                report.write(f"token_elapsed_ms={token_elapsed}\n")
+            report.write("".join(f"token_{key}={value}\n" for key, value in token_details.items()))
+            report.flush()
+            # Read tool versions only after server timing, so Deno is not pre-warmed.
+            report.write("\n--- environment ---\n" + _comparison_metadata(source, deno, ytdlp))
+            if mode == "compiled" and status in ("ready", "late-ready"):
+                report.write(f"candidate_bytes={(target / binary_name('unbundled')).stat().st_size}\n")
+        print(f"BGUTIL P3 COLD: {status} | mode={mode} | elapsed_ms={elapsed} | ping_attempts={attempts}")
+        print(f"BGUTIL P3 TOKEN: {token_status}")
+        print(f"BGUTIL P3 LOG: %LOCALAPPDATA%\\RR-V\\diagnostics\\{Path(report.name).name}")
+        return 0 if status in ("ready", "late-ready") and token_status == "bgutil-token-confirmed" else 1
+    except OSError:
+        print("BGUTIL P3 COLD: report-io-error")
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Stage03 P3 isolated Deno bundle/compile experiment")
     action = parser.add_mutually_exclusive_group(required=True)
@@ -661,6 +774,7 @@ def main(argv: list[str] | None = None) -> int:
     action.add_argument("--probe", action="store_true", help="Probe an existing candidate without pre-warming it")
     action.add_argument("--verify", action="store_true", help="Hash-check existing compiled file")
     action.add_argument("--compare", action="store_true", help="Build and probe an unbundled candidate with a local report")
+    action.add_argument("--cold-check", choices=("compiled", "source"), help="Time one first start and verify live token issuance")
     parser.add_argument("--variant", choices=VARIANTS, default="bundled")
     parser.add_argument("--verbose", action="store_true", help="With --probe, save a detailed log locally")
     args = parser.parse_args(argv)
@@ -670,7 +784,9 @@ def main(argv: list[str] | None = None) -> int:
     if not local or os.name != "nt":
         print("BGUTIL P3: requires-windows-localappdata")
         return 2
-    source, target = paths_for(Path(local), "unbundled" if args.compare else args.variant)
+    source, target = paths_for(Path(local), "unbundled" if args.compare or args.cold_check else args.variant)
+    if args.cold_check:
+        return cold_check(source, target, args.cold_check, find_executable("deno.exe"), find_executable("yt-dlp.exe"))
     if args.compare:
         return compare_unbundled(source, target, find_executable("deno.exe"))
     if args.prepare_bundler:

@@ -441,6 +441,89 @@ class CompileProbeTests(unittest.TestCase):
         self.assertIn("12345678\n", log)
         self.assertIn("stderr continuation (0 intervening bytes omitted) ---\n90", log)
 
+    def test_live_token_check_uses_only_the_ready_bgutils_server(self):
+        trace = ('[debug] PO Token Providers: bgutil:http-2.0.2\n'
+                 '[pot:bgutil:http] Generating a gvs PO Token\n'
+                 'PO Token response from "bgutil:http" provider: PoTokenResponse(po_token="secret")')
+        ytdlp = self.root / "yt-dlp.exe"
+        with patch.object(PROBE.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout=trace)) as run:
+            result, signals = PROBE._verify_live_token(self.source, "http://127.0.0.1:50321", ytdlp, self.deno)
+        self.assertEqual(result, "bgutil-token-confirmed")
+        self.assertTrue(signals["bgutil_response"])
+        self.assertFalse(signals["wpc_registered"])
+        self.assertNotIn("secret", repr(signals))
+        args = run.call_args.args[0]
+        self.assertIn("--simulate", args)
+        self.assertIn("--no-plugin-dirs", args)
+        self.assertIn("youtubepot-bgutilhttp:base_url=http://127.0.0.1:50321", args)
+        self.assertEqual(args.count("--plugin-dirs"), 1)
+
+    def test_cold_check_times_readiness_before_token_and_tool_metadata(self):
+        target = self.root / "bgutil-stage03-compiled-unbundled"
+        target.mkdir()
+        binary = target / PROBE.binary_name("unbundled")
+        binary.write_bytes(b"candidate")
+        (target / PROBE.MARKER_NAME).write_text(json.dumps(PROBE._compiled_marker("unbundled", binary)))
+        for mode in ("compiled", "source"):
+            with self.subTest(mode=mode):
+                order = []
+                clock = [0.0]
+                fake = FakeRunningProcess()
+
+                def token(_source, url, *_tools):
+                    self.assertEqual(url, "http://127.0.0.1:50321")
+                    self.assertFalse(fake.stopped)
+                    clock[0] += 15
+                    order.append("token")
+                    return "bgutil-token-confirmed", {"bgutil_response": True}
+
+                def metadata(*_args):
+                    order.append("metadata")
+                    self.assertTrue(fake.stopped)
+                    return "tool_versions=fixed\n"
+
+                with (
+                    patch.object(PROBE, "_allocate_port", return_value=50321),
+                    patch.object(PROBE, "_ping_status", return_value="ready"),
+                    patch.object(PROBE, "_compiled_marker", side_effect=AssertionError("would pre-warm binary")),
+                    patch.object(PROBE, "_verify_live_token", side_effect=token),
+                    patch.object(PROBE, "_comparison_metadata", side_effect=metadata),
+                    patch.object(PROBE.time, "monotonic", side_effect=lambda: clock[0]),
+                    patch.object(PROBE.subprocess, "Popen", return_value=fake) as popen,
+                    redirect_stdout(io.StringIO()),
+                ):
+                    self.assertEqual(PROBE.cold_check(self.source, target, mode, self.deno, self.deno), 0)
+                self.assertEqual(order, ["token", "metadata"])
+                command = popen.call_args.args[0]
+                self.assertEqual(command[0], str(binary if mode == "compiled" else self.deno))
+                if mode == "source":
+                    self.assertEqual(popen.call_args.kwargs["env"]["DENO_DIR"], str(self.source / "deno-cache"))
+                (report,) = self.root.glob(f"bgutil-p3-cold-{mode}-*.log")
+                log = report.read_text(encoding="utf-8")
+                self.assertIn("result=ready elapsed_ms=0", log)
+                self.assertIn("+15000 ms yt-dlp token simulation finished", log)
+                self.assertIn("token_elapsed_ms=15000", log)
+                self.assertIn("token_bgutil_response=True", log)
+
+    def test_cold_check_stops_recording_raw_output_before_live_token_request(self):
+        trace = PROBE._ProbeTrace()
+        trace.capture("stderr", b"startup only")
+        fake = FakeRunningProcess()
+
+        def token(_url):
+            trace.capture("stderr", b"live-token-secret")
+            self.assertFalse(fake.stopped)
+
+        with (
+            patch.object(PROBE, "_allocate_port", return_value=50321),
+            patch.object(PROBE, "_ping_status", return_value="ready"),
+            patch.object(PROBE.subprocess, "Popen", return_value=fake),
+        ):
+            status, elapsed, attempts = PROBE._probe_server([str(self.deno)], self.root, trace=trace, after_ready=token)
+        log = trace.render("unbundled", status, elapsed, attempts)
+        self.assertIn("startup only", log)
+        self.assertNotIn("live-token-secret", log)
+
     def test_probe_classifies_known_startup_errors(self):
         for stderr, reason in (
             (b"Error: listen EADDRINUSE", "listen-error"),

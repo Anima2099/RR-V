@@ -128,6 +128,37 @@ version metadata, build output and, when reached, the probe timeline and
 startup output. The report masks recognizable credentials and user-home
 paths while preserving error messages and module-relative stack frames.
 
+## First-start timing and live token verification
+
+Once the unbundled executable has passed the comparison probe, update the
+repository before rebooting. Use a separate Windows **Restart** for each mode.
+Run one command per boot from PowerShell without opening RR-V, running Deno,
+or inspecting or rebuilding the candidate first:
+
+```powershell
+# First boot: previously built P3 executable
+.\.venv\Scripts\python.exe .\tests\manual\bgutil_compile_probe.py --cold-check compiled
+```
+
+```powershell
+# Second boot: the same lean BgUtils inputs launched as source with Deno
+.\.venv\Scripts\python.exe .\tests\manual\bgutil_compile_probe.py --cold-check source
+```
+
+Use comparable time after sign-in and normal security settings. The report
+records uptime and an estimated boot time, launch and HTTP stages, and the tool
+versions collected after startup. Neither mode compiles or hashes the full
+candidate before measurement. The two runs are a first comparison, not a
+guarantee that the system cache or background load matched.
+
+After `/ping` responds, the same server stays running for an isolated yt-dlp
+simulation against a public YouTube video, using only the verified lean
+BgUtils plugin. The startup elapsed time ends at `/ping`. The simulation does
+not download the video or use WPC, Chrome, or account cookies. The report
+contains token request and response signals, not token values or raw yt-dlp
+output. Server output capture stops before the live token phase. Send both
+`bgutil-p3-cold-*.log` reports after reviewing them for any private details.
+
 Optional file hash validation (not for timing):
 
 ```powershell
