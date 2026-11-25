@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
+from contextlib import contextmanager
 import ctypes
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
@@ -26,7 +27,7 @@ import sys
 import tempfile
 import threading
 import time
-from typing import BinaryIO, Callable
+from typing import BinaryIO, Callable, Iterator
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
@@ -49,6 +50,7 @@ BUNDLER_TIMEOUT = 120
 BUNDLER_CACHE_NAME = "bgutil-stage03-p3-cache"
 BUNDLER_MARKER = "rrv-p3-bundler-ready"
 PROBE_TIMEOUT = 70.0
+LAUNCH_PROGRESS_INTERVAL = 5.0
 TOKEN_PROBE_TIMEOUT = 150
 PROBE_LOG_STREAM_LIMIT = 256 * 1024
 PROBE_LOG_TAIL_LIMIT = 32 * 1024
@@ -411,6 +413,7 @@ class _ProbeTrace:
         self.start = time.monotonic()
         self.lock = threading.Lock()
         self.capture_enabled = True
+        self.progress: Callable[[str], None] | None = None
         self.events: list[str] = []
         self.streams = {"stdout": bytearray(), "stderr": bytearray()}
         self.overflow = {"stdout": bytearray(), "stderr": bytearray()}
@@ -502,6 +505,34 @@ def _probe_failure_reason(stderr: bytes) -> str:
     return "unclassified"
 
 
+@contextmanager
+def _launch_progress(notify: Callable[[str], None] | None, started_at: float, timeout: float) -> Iterator[None]:
+    if notify is None:
+        yield
+        return
+    notify("launch-requested")
+    finished = threading.Event()
+
+    def heartbeat() -> None:
+        while not finished.wait(LAUNCH_PROGRESS_INTERVAL):
+            elapsed = time.monotonic() - started_at
+            message = f"waiting-for-process | elapsed_ms={round(elapsed * 1000)}"
+            if elapsed >= timeout:
+                message += " | startup-budget-elapsed"
+            try:
+                notify(message)
+            except OSError:
+                return
+
+    worker = threading.Thread(target=heartbeat, daemon=True)
+    worker.start()
+    try:
+        yield
+    finally:
+        finished.set()
+        worker.join()
+
+
 def probe(
     target: Path, variant: str, *, timeout: float = PROBE_TIMEOUT, trace: _ProbeTrace | None = None,
     after_ready: Callable[[str], None] | None = None,
@@ -527,21 +558,29 @@ def _probe_server(
     start = time.monotonic()
     attempts = 0
     process = None
+    phase = "launch"
+    ready_elapsed = None
     # Drain continuously to avoid blocking the child on a full pipe.
     stderr_tail: deque[bytes] = deque(maxlen=16)
     readers = []
     record = trace.record if trace is not None else lambda event: None
+    notify = trace.progress if trace is not None else None
     try:
         record("launch requested")
-        process = subprocess.Popen(
-            [*command, "--host", "127.0.0.1", "--port", str(port)],
-            cwd=str(cwd), env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE if trace is not None else subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        record("process launched")
+        with _launch_progress(notify, start, timeout):
+            process = subprocess.Popen(
+                [*command, "--host", "127.0.0.1", "--port", str(port)],
+                cwd=str(cwd), env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE if trace is not None else subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            launch_elapsed = time.monotonic() - start
+            record("process launched")
+        phase = "readiness"
+        if notify is not None:
+            notify(f"process-launched | elapsed_ms={round(launch_elapsed * 1000)}")
         for channel in ("stderr", "stdout"):
             stream = getattr(process, channel, None)
             if stream is not None:
@@ -550,6 +589,8 @@ def _probe_server(
                 )
                 reader.start()
                 readers.append(reader)
+        if launch_elapsed >= timeout:
+            return f"{kind}-launch-timeout", round(launch_elapsed * 1000), attempts
         url = f"http://127.0.0.1:{port}"
         while time.monotonic() - start < timeout:
             code = process.poll()
@@ -566,14 +607,24 @@ def _probe_server(
             ping_status = _ping_status(url)
             record(f"ping {attempts}: {ping_status}")
             if ping_status == "ready":
-                elapsed = round((time.monotonic() - start) * 1000)
+                ready_elapsed = round((time.monotonic() - start) * 1000)
                 if after_ready is not None:
+                    phase = "token"
                     if trace is not None:
                         trace.stop_capture()
+                    if notify is not None:
+                        notify(f"ready | elapsed_ms={ready_elapsed} | checking-token")
                     after_ready(url)
-                return ("late-ready" if elapsed > PRODUCTION_FIRST_BUDGET_MS else "ready"), elapsed, attempts
+                return ("late-ready" if ready_elapsed > PRODUCTION_FIRST_BUDGET_MS else "ready"), ready_elapsed, attempts
             time.sleep(0.2)
         return f"{kind}-timeout", round((time.monotonic() - start) * 1000), attempts
+    except KeyboardInterrupt:
+        if notify is None:
+            raise
+        interrupted_at = round((time.monotonic() - start) * 1000)
+        record(f"interrupted during {phase} at elapsed_ms={interrupted_at}")
+        notify(f"interrupted-{phase} | elapsed_ms={interrupted_at}")
+        return f"{kind}-interrupted-{phase}", interrupted_at if ready_elapsed is None else ready_elapsed, attempts
     except (OSError, ValueError) as error:
         record(f"launch or probe failed: {type(error).__name__}, os_error={getattr(error, 'winerror', None) or getattr(error, 'errno', None)}")
         return f"{kind}-launch-error", round((time.monotonic() - start) * 1000), attempts
@@ -734,6 +785,14 @@ def cold_check(source: Path, target: Path, mode: str, deno: Path | None, ytdlp: 
         ) as report:
             report.write(f"mode={mode} startup_budget_ms={PRODUCTION_FIRST_BUDGET_MS}\n" + _boot_snapshot())
             report.flush()
+            print(f"BGUTIL P3 LOG: %LOCALAPPDATA%\\RR-V\\diagnostics\\{Path(report.name).name}", flush=True)
+
+            def show_progress(message: str) -> None:
+                report.write(f"progress={message}\n")
+                report.flush()
+                print(f"BGUTIL P3 PROGRESS: {message}", flush=True)
+
+            trace.progress = show_progress
             if mode == "compiled":
                 status, elapsed, attempts = probe(target, "unbundled", trace=trace, after_ready=verify_token)
             elif deno is None or not deno.is_file():
@@ -747,6 +806,8 @@ def cold_check(source: Path, target: Path, mode: str, deno: Path | None, ytdlp: 
                     kind="source", trace=trace, after_ready=verify_token,
                 )
             variant = "unbundled" if mode == "compiled" else "p2-lean-source"
+            if status.endswith("-interrupted-token"):
+                token_status = "interrupted"
             report.write(_redact_comparison_report(trace.render(variant, status, elapsed, attempts)))
             report.write(f"\ntoken_result={token_status}\n")
             if token_elapsed is not None:
@@ -754,12 +815,20 @@ def cold_check(source: Path, target: Path, mode: str, deno: Path | None, ytdlp: 
             report.write("".join(f"token_{key}={value}\n" for key, value in token_details.items()))
             report.flush()
             # Read tool versions only after server timing, so Deno is not pre-warmed.
-            report.write("\n--- environment ---\n" + _comparison_metadata(source, deno, ytdlp))
+            if "-interrupted-" in status:
+                report.write("\nenvironment=skipped-after-interrupt\n")
+            else:
+                version_deno = deno
+                if status == "source-launch-timeout":
+                    version_deno = None
+                    report.write("\ndeno_version_probe=skipped-after-launch-timeout\n")
+                report.write("\n--- environment ---\n" + _comparison_metadata(source, version_deno, ytdlp))
             if mode == "compiled" and status in ("ready", "late-ready"):
                 report.write(f"candidate_bytes={(target / binary_name('unbundled')).stat().st_size}\n")
         print(f"BGUTIL P3 COLD: {status} | mode={mode} | elapsed_ms={elapsed} | ping_attempts={attempts}")
         print(f"BGUTIL P3 TOKEN: {token_status}")
-        print(f"BGUTIL P3 LOG: %LOCALAPPDATA%\\RR-V\\diagnostics\\{Path(report.name).name}")
+        if "-interrupted-" in status:
+            return 130
         return 0 if status in ("ready", "late-ready") and token_status == "bgutil-token-confirmed" else 1
     except OSError:
         print("BGUTIL P3 COLD: report-io-error")

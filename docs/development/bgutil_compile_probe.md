@@ -151,6 +151,13 @@ versions collected after startup. Neither mode compiles or hashes the full
 candidate before measurement. The two runs are a first comparison, not a
 guarantee that the system cache or background load matched.
 
+The report path appears immediately. While Windows is still creating the
+server process, a progress line is printed and saved every five seconds.
+Windows can hold the process-creation call past the probe deadline. This is
+reported separately from a server that launched and never responded. If you
+press Ctrl+C, send the same report once the interruption is recorded. A
+blocked Windows call may delay delivery of the interruption.
+
 After `/ping` responds, the same server stays running for an isolated yt-dlp
 simulation against a public YouTube video, using only the verified lean
 BgUtils plugin. The startup elapsed time ends at `/ping`. The simulation does

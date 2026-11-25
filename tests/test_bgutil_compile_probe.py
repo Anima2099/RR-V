@@ -11,6 +11,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import types
 import unittest
 from unittest.mock import patch
@@ -523,6 +524,53 @@ class CompileProbeTests(unittest.TestCase):
         log = trace.render("unbundled", status, elapsed, attempts)
         self.assertIn("startup only", log)
         self.assertNotIn("live-token-secret", log)
+
+    def test_cold_check_flushes_launch_progress_and_saves_interruption(self):
+        target = self.root / "bgutil-stage03-compiled-unbundled"
+        waiting = threading.Event()
+        console = io.StringIO()
+
+        def print_progress(message, **_kwargs):
+            console.write(message + "\n")
+            if "waiting-for-process" in message:
+                waiting.set()
+
+        def blocked_launch(*_args, **_kwargs):
+            self.assertTrue(waiting.wait(2), "no progress while Popen was blocked")
+            (report,) = self.root.glob("bgutil-p3-cold-source-*.log")
+            self.assertIn("progress=waiting-for-process", report.read_text(encoding="utf-8"))
+            raise KeyboardInterrupt
+
+        with (
+            patch.object(PROBE, "LAUNCH_PROGRESS_INTERVAL", 0.01),
+            patch.object(PROBE, "_allocate_port", return_value=50321),
+            patch.object(PROBE.subprocess, "Popen", side_effect=blocked_launch),
+            patch.object(PROBE, "_comparison_metadata") as metadata,
+            patch.object(PROBE, "_verify_live_token") as token,
+            patch.object(PROBE, "print", side_effect=print_progress, create=True),
+        ):
+            self.assertEqual(PROBE.cold_check(self.source, target, "source", self.deno, self.deno), 130)
+        metadata.assert_not_called()
+        token.assert_not_called()
+        (report,) = self.root.glob("bgutil-p3-cold-source-*.log")
+        log = report.read_text(encoding="utf-8")
+        self.assertIn("BGUTIL P3 LOG:", console.getvalue())
+        self.assertRegex(log, r"progress=interrupted-launch \| elapsed_ms=\d+")
+        self.assertRegex(log, r"result=source-interrupted-launch elapsed_ms=\d+ ping_attempts=0")
+        self.assertNotIn("process launched", log)
+
+    def test_launch_over_deadline_is_distinct_from_http_timeout(self):
+        fake = FakeRunningProcess()
+        with (
+            patch.object(PROBE, "_allocate_port", return_value=50321),
+            patch.object(PROBE.time, "monotonic", side_effect=[0, 71]),
+            patch.object(PROBE.subprocess, "Popen", return_value=fake),
+            patch.object(PROBE, "_ping_status") as ping,
+        ):
+            status, elapsed, attempts = PROBE._probe_server([str(self.deno)], self.root, kind="source")
+        self.assertEqual((status, elapsed, attempts), ("source-launch-timeout", 71000, 0))
+        self.assertTrue(fake.terminated)
+        ping.assert_not_called()
 
     def test_probe_classifies_known_startup_errors(self):
         for stderr, reason in (
