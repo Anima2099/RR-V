@@ -105,9 +105,28 @@ executable:
 `BGUTIL P3 LOG` identifies a new local file under
 `%LOCALAPPDATA%\RR-V\diagnostics`. It records launch, first output, HTTP results,
 process exit and cleanup, with stdout and stderr in separate sections. Each
-stream retains up to 256 KiB and reports how many bytes were captured and read.
+stream retains the first 256 KiB and up to 32 KiB of later output, reporting
+how many bytes were read and whether intermediate output was omitted.
 The report contains raw process output and is not uploaded. Review and redact
 private paths, URLs, or credentials before sharing excerpts.
+
+## Unbundled Windows comparison
+
+Once the P3 cache is prepared, run from the RR-V repository:
+
+```powershell
+.\.venv\Scripts\python.exe .\tests\manual\bgutil_compile_probe.py --compare
+```
+
+This compiles a separate `bgutil-stage03-compiled-unbundled` candidate with
+the same flags as the bundled build except `--bundle`. After a successful
+build it automatically checks loopback `/ping`. An existing verified comparison
+binary is reused. The bundled candidate is left in its separate directory.
+
+The `BGUTIL P3 LOG` path identifies a single report containing environment and
+version metadata, build output and, when reached, the probe timeline and
+startup output. The report masks recognizable credentials and user-home
+paths while preserving error messages and module-relative stack frames.
 
 Optional file hash validation (not for timing):
 

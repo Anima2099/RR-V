@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import shutil
 import socket
@@ -24,7 +25,7 @@ import threading
 import time
 from typing import BinaryIO
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,7 +38,7 @@ from services import bgutil_http_service as bgutil
 # A self-extracting variant may be tried separately if native canvas cannot
 # run from the ordinary compiled bundle. It is NOT the default: extraction
 # adds file writes and can undermine the cold-start optimization objective.
-VARIANTS = ("bundled", "extracted")
+VARIANTS = ("bundled", "extracted", "unbundled")
 MARKER_NAME = "rrv-p3-compiled.json"
 LEAN_MARKER = "rrv-lean-experiment.json"
 BUILD_TIMEOUT = 360
@@ -46,6 +47,7 @@ BUNDLER_CACHE_NAME = "bgutil-stage03-p3-cache"
 BUNDLER_MARKER = "rrv-p3-bundler-ready"
 PROBE_TIMEOUT = 70.0
 PROBE_LOG_STREAM_LIMIT = 256 * 1024
+PROBE_LOG_TAIL_LIMIT = 32 * 1024
 PRODUCTION_FIRST_BUDGET_MS = 18_000
 MIN_FREE_BYTES = 512 * 1024 * 1024
 # server/deno.lock from bgutil.SOURCE_COMMIT, normalized to LF.
@@ -155,10 +157,12 @@ def compile_command(deno: Path, output: Path, variant: str) -> list[str]:
     if variant not in VARIANTS:
         raise ValueError("unknown variant")
     command = [
-        str(deno), "compile", "--bundle", "--no-check", "--cached-only",
+        str(deno), "compile", "--no-check", "--cached-only",
         "--frozen-lockfile", "--node-modules-dir=manual",
         "--allow-env", "--allow-net", "--allow-read=.", "--allow-ffi=.",
     ]
+    if variant != "unbundled":
+        command.insert(2, "--bundle")
     if variant == "extracted":
         command.append("--self-extracting")
     command.extend(["--output", str(output), "../src/main.ts"])
@@ -268,7 +272,9 @@ def _cache_miss_reference(stderr: bytes, lockfile: Path) -> str:
     return "npm"
 
 
-def build(source: Path, target: Path, deno: Path | None, variant: str) -> str:
+def build(
+    source: Path, target: Path, deno: Path | None, variant: str, *, trace: _ProbeTrace | None = None,
+) -> str:
     """Compile to a new, fixed, diagnostics-only directory; never overwrite."""
     if variant not in VARIANTS:
         return "unsupported-variant"
@@ -295,16 +301,23 @@ def build(source: Path, target: Path, deno: Path | None, variant: str) -> str:
         succeeded = False
         try:
             output = target / binary_name(variant)
+            command = compile_command(deno, output, variant)
+            if trace is not None:
+                trace.record("compile requested")
             result = subprocess.run(
-                compile_command(deno, output, variant),
+                command,
                 cwd=str(source / "server" / "node_modules"),
                 env=_deno_environment(cache / "deno-cache"),
                 stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
+                stdout=subprocess.PIPE if trace is not None else subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 timeout=BUILD_TIMEOUT,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
+            if trace is not None:
+                trace.record(f"compiler exited: code={result.returncode}")
+                trace.capture("stdout", result.stdout or b"", live=False)
+                trace.capture("stderr", result.stderr or b"", live=False)
             if result.returncode:
                 reason = _compile_failure_reason(result.stderr)
                 summary = f"compile-failed | exit_code={result.returncode} | reason={reason}"
@@ -322,9 +335,15 @@ def build(source: Path, target: Path, deno: Path | None, variant: str) -> str:
                 return "compiled-verification-failed"
             succeeded = True
             return "built"
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as error:
+            if trace is not None:
+                trace.record("compiler timed out")
+                trace.capture("stdout", error.stdout or b"", live=False)
+                trace.capture("stderr", error.stderr or b"", live=False)
             return "compile-timeout"
-        except (OSError, ValueError):
+        except (OSError, ValueError) as error:
+            if trace is not None:
+                trace.record(f"compile setup error: {type(error).__name__}, os_error={getattr(error, 'winerror', None) or getattr(error, 'errno', None)}")
             return "compile-setup-failed"
         finally:
             if not succeeded:
@@ -389,6 +408,7 @@ class _ProbeTrace:
         self.lock = threading.Lock()
         self.events: list[str] = []
         self.streams = {"stdout": bytearray(), "stderr": bytearray()}
+        self.overflow = {"stdout": bytearray(), "stderr": bytearray()}
         self.received = {"stdout": 0, "stderr": 0}
 
     def _record(self, event: str) -> None:
@@ -399,27 +419,42 @@ class _ProbeTrace:
         with self.lock:
             self._record(event)
 
-    def capture(self, channel: str, block: bytes) -> None:
+    def capture(self, channel: str, block: bytes, *, live: bool = True) -> None:
         with self.lock:
-            if not self.received[channel]:
+            if live and block and not self.received[channel]:
                 self._record(f"first {channel} bytes")
             self.received[channel] += len(block)
             buffer = self.streams[channel]
             remaining = PROBE_LOG_STREAM_LIMIT - len(buffer)
             buffer.extend(block[:remaining])
+            if len(block) > remaining:
+                tail = self.overflow[channel]
+                tail.extend(block[max(remaining, len(block) - PROBE_LOG_TAIL_LIMIT):])
+                del tail[:-PROBE_LOG_TAIL_LIMIT]
 
-    def render(self, variant: str, status: str, elapsed: int, attempts: int) -> str:
+    def render(self, variant: str, status: str, elapsed: int, attempts: int | None) -> str:
         with self.lock:
+            probing = attempts is not None
+            phase = "probe" if probing else "build"
+            timeout = PROBE_TIMEOUT if probing else BUILD_TIMEOUT
+            result = f"result={status} elapsed_ms={elapsed}"
+            if probing:
+                result += f" ping_attempts={attempts}"
             lines = [
-                "RR-V Stage03 P3 verbose probe (local diagnostic)",
+                f"RR-V Stage03 P3 verbose {phase}",
                 f"started_at_utc={self.started_at}",
-                f"variant={variant} expected_version={bgutil.PROVIDER_VERSION} timeout_s={PROBE_TIMEOUT}",
-                f"result={status} elapsed_ms={elapsed} ping_attempts={attempts}",
+                f"variant={variant} expected_version={bgutil.PROVIDER_VERSION} timeout_s={timeout}",
+                result,
                 "\n--- timeline ---", *self.events,
             ]
             for channel, buffer in self.streams.items():
                 lines.append(f"\n--- {channel} ({len(buffer)} of {self.received[channel]} bytes captured) ---")
                 lines.append(buffer.decode("utf-8", errors="replace") if buffer else "(empty)")
+                tail = self.overflow[channel]
+                if tail:
+                    omitted = self.received[channel] - len(buffer) - len(tail)
+                    lines.append(f"--- {channel} continuation ({omitted} intervening bytes omitted) ---")
+                    lines.append(tail.decode("utf-8", errors="replace"))
             return "\n".join(lines) + "\n"
 
 
@@ -529,6 +564,95 @@ def probe(
                     record("output stream did not finish draining")
 
 
+def _comparison_metadata(source: Path, deno: Path | None) -> str:
+    commands = [
+        ("git_commit", ["git", "rev-parse", "HEAD"], rb"(?m)^([a-f0-9]{40,64})\r?$"),
+    ]
+    if deno is not None:
+        commands.append(("deno", [str(deno), "--version"], rb"(?m)^deno ([0-9]+\.[0-9]+\.[0-9]+[\w.+-]*)"))
+    fields = [f"os={platform.system()} {platform.version()} arch={platform.machine()}",
+              f"bgutils={bgutil.PROVIDER_VERSION}"]
+    for name, command, pattern in commands:
+        value = "unavailable"
+        try:
+            result = subprocess.run(
+                command, cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, timeout=8,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            match = re.search(pattern, result.stdout or b"")
+            if result.returncode == 0 and match:
+                value = match[1].decode("ascii")
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        fields.append(f"{name}={value}")
+    try:
+        lock = json.loads((source / "server" / "deno.lock").read_text(encoding="utf-8"))
+        for package in ("jsdom", "canvas"):
+            versions = sorted({
+                match[0] for specifier, resolved in lock["specifiers"].items()
+                if specifier.startswith(f"npm:{package}@") and isinstance(resolved, str)
+                and (match := re.match(r"\d+\.\d+\.\d+", resolved))
+            })
+            fields.append(f"{package}={','.join(versions) or 'unavailable'}")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        fields.append("npm_lock_versions=unavailable")
+    fields.append("compile_arguments=" + " ".join(compile_command(Path("deno.exe"), Path("candidate.exe"), "unbundled")[1:]))
+    return "\n".join(fields) + "\n"
+
+
+def _redact_comparison_report(report: str) -> str:
+    report = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", report)
+    for home in {str(Path.home()), os.environ.get("USERPROFILE", "")}:
+        if not home or len(home.rstrip("\\/")) < 4:
+            continue
+        forward = home.replace("\\", "/")
+        for form in {home, forward, home.replace("\\", "\\\\"), quote(forward, safe="/:")}:
+            report = re.sub(re.escape(form), "<user-home>", report, flags=re.IGNORECASE)
+    report = re.sub(r"(?i)[a-z]:[/\\]+users[/\\]+[^/\\\r\n\"'<>]+(?=[/\\])", "<user-home>", report)
+    report = re.sub(r"(?i)(https?://)[^\s/@]+@", r"\1<redacted>@", report)
+    report = re.sub(r"(?i)([?&](?:pot|sig|lsig|spc|token|sessionid|jwt|access_token|refresh_token|api_key)=)[^&\s\"']+", r"\1<redacted>", report)
+    report = re.sub(r"(?im)(\b(?:authorization|proxy-authorization|cookie|set-cookie)\s*:\s*)[^\r\n]+", r"\1<redacted>", report)
+    report = re.sub(
+        r"(?i)(\b(?:password|passwd|api[_-]?key|(?:access|refresh|po)[_ -]?token|token|client[_-]?secret)"
+        r"\b[\"']?\s*[=:]\s*)(?:\"(?:\\.|[^\"\\\r\n])*\"|'(?:\\.|[^'\\\r\n])*'|[^\s,&;\"'}\]]+)",
+        r"\1<redacted>", report,
+    )
+    report = re.sub(r"(?i)(\b(?:authorization|proxy-authorization|cookie|set-cookie)[\"']\s*:\s*)"
+                    r"(?:\"(?:\\.|[^\"\\\r\n])*\"|'(?:\\.|[^'\\\r\n])*')", r"\1<redacted>", report)
+    return report
+
+
+def compare_unbundled(source: Path, target: Path, deno: Path | None) -> int:
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", prefix="bgutil-p3-compare-", suffix=".log",
+            dir=target.parent, delete=False,
+        ) as report:
+            report.write(_comparison_metadata(source, deno))
+            build_trace = _ProbeTrace()
+            build_status = build(source, target, deno, "unbundled", trace=build_trace)
+            elapsed = round((time.monotonic() - build_trace.start) * 1000)
+            report.write("\n" + _redact_comparison_report(build_trace.render("unbundled", build_status, elapsed, None)))
+            report.flush()
+            print(f"BGUTIL P3 BUILD: {build_status} | variant=unbundled", flush=True)
+            probe_status = "skipped-build-failed"
+            if build_status in ("built", "already-built"):
+                report.write(f"\ncandidate_bytes={(target / binary_name('unbundled')).stat().st_size}\n")
+                probe_trace = _ProbeTrace()
+                probe_status, elapsed, attempts = probe(target, "unbundled", trace=probe_trace)
+                report.write("\n" + _redact_comparison_report(probe_trace.render("unbundled", probe_status, elapsed, attempts)))
+                print(f"BGUTIL P3 PROBE: {probe_status} | variant=unbundled | elapsed_ms={elapsed} | ping_attempts={attempts}")
+            else:
+                report.write("\nprobe=skipped-build-failed\n")
+        print(f"BGUTIL P3 LOG: %LOCALAPPDATA%\\RR-V\\diagnostics\\{Path(report.name).name}")
+        return 0 if probe_status in ("ready", "late-ready") else 1
+    except OSError:
+        print("BGUTIL P3 COMPARE: report-or-candidate-io-error")
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Stage03 P3 isolated Deno bundle/compile experiment")
     action = parser.add_mutually_exclusive_group(required=True)
@@ -536,6 +660,7 @@ def main(argv: list[str] | None = None) -> int:
     action.add_argument("--build", action="store_true", help="Compile a separate candidate once")
     action.add_argument("--probe", action="store_true", help="Probe an existing candidate without pre-warming it")
     action.add_argument("--verify", action="store_true", help="Hash-check existing compiled file")
+    action.add_argument("--compare", action="store_true", help="Build and probe an unbundled candidate with a local report")
     parser.add_argument("--variant", choices=VARIANTS, default="bundled")
     parser.add_argument("--verbose", action="store_true", help="With --probe, save a detailed log locally")
     args = parser.parse_args(argv)
@@ -545,7 +670,9 @@ def main(argv: list[str] | None = None) -> int:
     if not local or os.name != "nt":
         print("BGUTIL P3: requires-windows-localappdata")
         return 2
-    source, target = paths_for(Path(local), args.variant)
+    source, target = paths_for(Path(local), "unbundled" if args.compare else args.variant)
+    if args.compare:
+        return compare_unbundled(source, target, find_executable("deno.exe"))
     if args.prepare_bundler:
         status = prepare_bundler(source, target.parent / BUNDLER_CACHE_NAME, find_executable("deno.exe"))
         print(f"BGUTIL P3 PREPARE: {status}")

@@ -275,6 +275,72 @@ class CompileProbeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             PROBE.compile_command(self.deno, self.target / "app.exe", "broken")
 
+    def test_comparison_runs_unbundled_build_and_probe_in_one_report(self):
+        _, target = PROBE.paths_for(self.root, "unbundled")
+        self.assertNotEqual(target.name, self.target.name)
+        target = self.root / target.name
+        lock = {"specifiers": {"npm:jsdom@^29.1.1": "29.1.1_canvas@3.2.3", "npm:canvas@^3.2.3": "3.2.3"}}
+        (self.source / "server" / "deno.lock").write_text(json.dumps(lock), encoding="utf-8")
+
+        def execute(command, **kwargs):
+            if command[0] == "git":
+                return subprocess.CompletedProcess(command, 0, stdout=b"a" * 40 + b"\r\n")
+            if command[1] == "--version":
+                return subprocess.CompletedProcess(command, 0, stdout=b"deno 2.9.8\r\n")
+            self.assertEqual(kwargs["env"]["DENO_DIR"], str(self.cache / "deno-cache"))
+            binary = target / PROBE.binary_name("unbundled")
+            bundled = PROBE.compile_command(self.deno, binary, "bundled")
+            bundled.remove("--bundle")
+            self.assertEqual(command, bundled)
+            binary.write_bytes(b"candidate")
+            return subprocess.CompletedProcess(command, 0, stdout=b"compiler output", stderr=b"compiler warning")
+
+        fake = FakeRunningProcess(
+            b'TypeError: failed\n    at file:///C:/Users/Private/AppData/module.js:10:5\n'
+            b'Authorization: Bearer auth-secret\nCookie: sid=cookie-secret\n'
+            b'{"password":"a \\"SECRET\\" value","authorization":"Bearer json-secret"}\n'
+            b'https://user:url-secret@example.com/?access_token=query-secret',
+            1, b"startup output",
+        )
+        fake.stopped = True
+        windows = types.SimpleNamespace(name="nt", environ={"LOCALAPPDATA": str(self.root), "USERPROFILE": r"C:\Users\Private"})
+        with (
+            patch.object(PROBE, "os", windows),
+            patch.object(PROBE, "paths_for", return_value=(self.source, target)) as paths,
+            patch.object(PROBE, "find_executable", return_value=self.deno),
+            patch.object(PROBE.subprocess, "run", side_effect=execute),
+            patch.object(PROBE.subprocess, "Popen", return_value=fake),
+            redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertEqual(PROBE.main(["--compare"]), 1)
+        paths.assert_called_once_with(self.root, "unbundled")
+        (report,) = self.root.glob("bgutil-p3-compare-*.log")
+        self.assertIn(report.name, output.getvalue())
+        log = report.read_text(encoding="utf-8")
+        for detail in ("jsdom=29.1.1", "canvas=3.2.3", "deno=2.9.8", "git_commit=" + "a" * 40,
+                       "candidate_bytes=9", "compiler output", "compiler warning", "startup output",
+                       "TypeError: failed", "AppData/module.js:10:5", "process exited before readiness"):
+            self.assertIn(detail, log)
+        for secret in ("Private", "auth-secret", "cookie-secret", "SECRET", "json-secret", "url-secret", "query-secret"):
+            self.assertNotIn(secret, log)
+
+    def test_comparison_reports_build_failure_without_starting_probe(self):
+        target = self.root / "bgutil-stage03-compiled-unbundled"
+        failure = subprocess.CompletedProcess([], 1, stdout=b"build progress", stderr=b"compiler broke")
+        with (
+            patch.object(PROBE, "_comparison_metadata", return_value="metadata\n"),
+            patch.object(PROBE.subprocess, "run", return_value=failure),
+            patch.object(PROBE.subprocess, "Popen") as popen,
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(PROBE.compare_unbundled(self.source, target, self.deno), 1)
+        popen.assert_not_called()
+        (report,) = self.root.glob("bgutil-p3-compare-*.log")
+        log = report.read_text(encoding="utf-8")
+        self.assertIn("probe=skipped-build-failed", log)
+        self.assertIn("compiler broke", log)
+        self.assertIn("build progress", log)
+
     def test_paths_do_not_refer_to_original_provider(self):
         src, dst = PROBE.paths_for(self.root, "bundled")
         self.assertEqual(src, self.root / "RR-V" / "diagnostics" / "bgutil-stage03-lean-experiment")
@@ -373,6 +439,7 @@ class CompileProbeTests(unittest.TestCase):
         log = trace.render("bundled", "compiled-timeout", 42, 1)
         self.assertIn("stderr (8 of 10 bytes captured)", log)
         self.assertIn("12345678\n", log)
+        self.assertIn("stderr continuation (0 intervening bytes omitted) ---\n90", log)
 
     def test_probe_classifies_known_startup_errors(self):
         for stderr, reason in (
