@@ -46,6 +46,8 @@ separate, explicitly approved follow-up test.
 - On a nonzero compile exit, the build reports Deno's exit code and a fixed
   error category derived from stderr. A dependency cache error also reports
   `cache_ref` with a recognized public package name or public host when known.
+  If the compiled server exits before responding, `--probe` reports its exit
+  code and a fixed startup error category in `reason`.
   Raw child output is never printed or saved. No private file paths, network
   port, URLs, credentials, or tokens are reported.
 - An unknown existing target folder is **never overwritten**. After a failed

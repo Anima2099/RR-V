@@ -8,6 +8,7 @@ The pinned upstream provider is GPL-3.0-only; do not distribute test binaries.
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import hashlib
 import json
 import os
@@ -18,7 +19,9 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from typing import BinaryIO
 from urllib.error import URLError
 from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
@@ -362,6 +365,34 @@ def _terminate(process: subprocess.Popen[bytes]) -> None:
             pass
 
 
+def _drain_probe_stderr(stream: BinaryIO, tail: deque[bytes]) -> None:
+    try:
+        with stream:
+            read = getattr(stream, "read1", stream.read)
+            while block := read(1024):
+                tail.append(block)
+    except (OSError, ValueError):
+        pass
+
+
+def _probe_failure_reason(stderr: bytes) -> str:
+    """Recognize startup signatures without returning any child output."""
+    message = stderr.lower()
+    if not message.strip():
+        return "no-stderr"
+    for pattern, reason in (
+        (rb"eaddrinuse|could not listen on|address already in use", "listen-error"),
+        (rb"notcapable|permission denied|requires? (?:--allow|(?:ffi|read|env|net) access)", "permission-error"),
+        (rb"dynamic require of .*not supported|require is not defined|err_require_esm", "module-format-error"),
+        (rb"err_dlopen_failed|\bdlopen\b|native (?:addon|module)|\.node\b", "native-addon-error"),
+        (rb"err_module_not_found|module not found|cannot find (?:module|package)", "module-resolution-error"),
+        (rb"enoent|no such file or directory|os error [23]\b", "file-not-found"),
+    ):
+        if re.search(pattern, message):
+            return reason
+    return "unclassified"
+
+
 def probe(target: Path, variant: str, *, timeout: float = PROBE_TIMEOUT) -> tuple[str, int, int]:
     """Launch only the compiled file from an isolated cwd. No source pre-run."""
     if variant not in VARIANTS:
@@ -376,20 +407,33 @@ def probe(target: Path, variant: str, *, timeout: float = PROBE_TIMEOUT) -> tupl
     start = time.monotonic()
     attempts = 0
     process = None
+    # Drain continuously to avoid blocking the child on a full pipe.
+    stderr_tail: deque[bytes] = deque(maxlen=16)
+    stderr_reader = None
     try:
         process = subprocess.Popen(
             [str(binary), "--host", "127.0.0.1", "--port", str(port)],
             cwd=str(target),  # Never rely on an ambient node_modules cwd.
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
+        if process.stderr is not None:
+            stderr_reader = threading.Thread(
+                target=_drain_probe_stderr, args=(process.stderr, stderr_tail), daemon=True,
+            )
+            stderr_reader.start()
         url = f"http://127.0.0.1:{port}"
         while time.monotonic() - start < timeout:
             code = process.poll()
             if code is not None:
-                return f"compiled-exited-before-ready:code={int(code)}", round((time.monotonic() - start) * 1000), attempts
+                elapsed = round((time.monotonic() - start) * 1000)
+                if stderr_reader is not None:
+                    stderr_reader.join(timeout=0.2)
+                reason = _probe_failure_reason(b"".join(stderr_tail.copy()))
+                status = f"compiled-exited-before-ready:code={int(code)} | reason={reason}"
+                return status, elapsed, attempts
             attempts += 1
             if _ping(url):
                 elapsed = round((time.monotonic() - start) * 1000)
@@ -401,6 +445,8 @@ def probe(target: Path, variant: str, *, timeout: float = PROBE_TIMEOUT) -> tupl
     finally:
         if process is not None:
             _terminate(process)
+        if stderr_reader is not None and stderr_reader.is_alive():
+            stderr_reader.join(timeout=0.2)
 
 
 def main(argv: list[str] | None = None) -> int:

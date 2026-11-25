@@ -24,13 +24,15 @@ SPEC.loader.exec_module(PROBE)
 
 
 class FakeRunningProcess:
-    def __init__(self):
+    def __init__(self, stderr=b"", returncode=0):
         self.stopped = False
         self.terminated = False
         self.killed = False
+        self.stderr = io.BytesIO(stderr)
+        self.returncode = returncode
 
     def poll(self):
-        return 0 if self.stopped else None
+        return self.returncode if self.stopped else None
 
     def terminate(self):
         self.terminated = True
@@ -293,7 +295,7 @@ class CompileProbeTests(unittest.TestCase):
         self.assertFalse(fake.killed)
         self.assertEqual(popen.call_args.kwargs["cwd"], str(self.target))
         self.assertEqual(popen.call_args.kwargs["stdout"], subprocess.DEVNULL)
-        self.assertEqual(popen.call_args.kwargs["stderr"], subprocess.DEVNULL)
+        self.assertEqual(popen.call_args.kwargs["stderr"], subprocess.PIPE)
         self.assertEqual(popen.call_args.args[0][-4:-2], ["--host", "127.0.0.1"])
 
     def test_probe_fails_cleanly_if_compiled_process_exits(self):
@@ -303,8 +305,43 @@ class CompileProbeTests(unittest.TestCase):
         with patch.object(PROBE, "_allocate_port", return_value=50321):
             with patch.object(PROBE.subprocess, "Popen", return_value=fake):
                 status, ms, calls = PROBE.probe(self.target, "bundled", timeout=1)
-        self.assertEqual(status, "compiled-exited-before-ready:code=0")
+        self.assertEqual(status, "compiled-exited-before-ready:code=0 | reason=no-stderr")
         self.assertEqual(calls, 0)
+
+    def test_probe_reports_only_safe_startup_reason(self):
+        self.assertEqual(self.build_ok(), "built")
+        # Split the error across reads and include more than the retained tail.
+        stderr = b"x" * (32 * 1024 + 1020)
+        stderr += b"ERR_DLOPEN_FAILED loading C:\\Users\\Private\\canvas.node\nhttps://private.example/?token=SECRET"
+        fake = FakeRunningProcess(stderr, returncode=1)
+        fake.stopped = True
+        output = io.StringIO()
+        windows = types.SimpleNamespace(name="nt", environ={"LOCALAPPDATA": str(self.root)})
+        with (
+            patch.object(PROBE, "os", windows),
+            patch.object(PROBE, "paths_for", return_value=(self.source, self.target)),
+            patch.object(PROBE, "_allocate_port", return_value=50321),
+            patch.object(PROBE.subprocess, "Popen", return_value=fake),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(PROBE.main(["--probe"]), 1)
+        status = output.getvalue().splitlines()[0]
+        self.assertRegex(status, r"^BGUTIL P3 PROBE: compiled-exited-before-ready:code=1"
+                                 r" \| reason=native-addon-error \| variant=bundled"
+                                 r" \| elapsed_ms=\d+ \| ping_attempts=0$")
+        self.assertTrue(fake.stderr.closed)
+
+    def test_probe_classifies_known_startup_errors(self):
+        for stderr, reason in (
+            (b"Error: listen EADDRINUSE", "listen-error"),
+            (b"NotCapable: Requires ffi access", "permission-error"),
+            (b'Dynamic require of "path" is not supported', "module-format-error"),
+            (b"Error: Cannot find module 'canvas'", "module-resolution-error"),
+            (b"NotFound: The system cannot find the path specified. (os error 3)", "file-not-found"),
+            (b"unknown error", "unclassified"),
+        ):
+            with self.subTest(reason=reason):
+                self.assertEqual(PROBE._probe_failure_reason(stderr), reason)
 
     def test_probe_returns_late_ready_without_real_waiting(self):
         self.assertEqual(self.build_ok(), "built")
