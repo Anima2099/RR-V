@@ -24,11 +24,12 @@ SPEC.loader.exec_module(PROBE)
 
 
 class FakeRunningProcess:
-    def __init__(self, stderr=b"", returncode=0):
+    def __init__(self, stderr=b"", returncode=0, stdout=None):
         self.stopped = False
         self.terminated = False
         self.killed = False
         self.stderr = io.BytesIO(stderr)
+        self.stdout = io.BytesIO(stdout) if stdout is not None else None
         self.returncode = returncode
 
     def poll(self):
@@ -285,7 +286,7 @@ class CompileProbeTests(unittest.TestCase):
         fake = FakeRunningProcess()
         with patch.object(PROBE, "_compiled_marker", side_effect=AssertionError("would warm binary")):
             with patch.object(PROBE, "_allocate_port", return_value=50321):
-                with patch.object(PROBE, "_ping", return_value=True):
+                with patch.object(PROBE, "_ping_status", return_value="ready"):
                     with patch.object(PROBE.subprocess, "Popen", return_value=fake) as popen:
                         status, elapsed, calls = PROBE.probe(self.target, "bundled", timeout=1.0)
         self.assertEqual(status, "ready")
@@ -330,6 +331,48 @@ class CompileProbeTests(unittest.TestCase):
                                  r" \| reason=native-addon-error \| variant=bundled"
                                  r" \| elapsed_ms=\d+ \| ping_attempts=0$")
         self.assertTrue(fake.stderr.closed)
+        self.assertFalse(list(self.root.glob("bgutil-p3-probe-*.log")))
+
+    def test_verbose_probe_keeps_detailed_output_local(self):
+        self.assertEqual(self.build_ok(), "built")
+        fake = FakeRunningProcess(b"TypeError: private error\n    at first stack frame\n", 1, b"startup output\n")
+        output = io.StringIO()
+        windows = types.SimpleNamespace(name="nt", environ={"LOCALAPPDATA": str(self.root)})
+
+        def ping(_url):
+            fake.stopped = True
+            return "connection-refused"
+
+        with (
+            patch.object(PROBE, "os", windows),
+            patch.object(PROBE, "paths_for", return_value=(self.source, self.target)),
+            patch.object(PROBE, "_allocate_port", return_value=50321),
+            patch.object(PROBE, "_ping_status", side_effect=ping),
+            patch.object(PROBE.subprocess, "Popen", return_value=fake) as popen,
+            redirect_stdout(output),
+        ):
+            self.assertEqual(PROBE.main(["--probe", "--verbose"]), 1)
+        self.assertEqual(popen.call_args.kwargs["stdout"], subprocess.PIPE)
+        (report,) = self.root.glob("bgutil-p3-probe-*.log")
+        self.assertIn(report.name, output.getvalue())
+        self.assertIn("reason=unclassified", output.getvalue())
+        self.assertNotIn("private error", output.getvalue())
+        log = report.read_text(encoding="utf-8")
+        for detail in (
+            "launch requested", "process launched", "ping 1 started", "ping 1: connection-refused",
+            "first stdout bytes", "first stderr bytes", "process exited before readiness: code=1",
+            "--- stdout", "startup output", "--- stderr", "TypeError: private error", "at first stack frame",
+        ):
+            self.assertIn(detail, log)
+
+    def test_verbose_probe_limits_capture_and_counts_truncated_bytes(self):
+        trace = PROBE._ProbeTrace()
+        with patch.object(PROBE, "PROBE_LOG_STREAM_LIMIT", 8):
+            trace.capture("stderr", b"123456")
+            trace.capture("stderr", b"7890")
+        log = trace.render("bundled", "compiled-timeout", 42, 1)
+        self.assertIn("stderr (8 of 10 bytes captured)", log)
+        self.assertIn("12345678\n", log)
 
     def test_probe_classifies_known_startup_errors(self):
         for stderr, reason in (
@@ -348,7 +391,7 @@ class CompileProbeTests(unittest.TestCase):
         fake = FakeRunningProcess()
         with patch.object(PROBE, "PRODUCTION_FIRST_BUDGET_MS", -1):
             with patch.object(PROBE, "_allocate_port", return_value=50321):
-                with patch.object(PROBE, "_ping", return_value=True):
+                with patch.object(PROBE, "_ping_status", return_value="ready"):
                     with patch.object(PROBE.subprocess, "Popen", return_value=fake):
                         status, *_ = PROBE.probe(self.target, "bundled", timeout=1)
         self.assertEqual(status, "late-ready")
@@ -394,7 +437,7 @@ class CompileProbeTests(unittest.TestCase):
                 return FakeReply()
         op = FakeOpener()
         with patch.object(PROBE, "build_opener", return_value=op) as opener:
-            self.assertTrue(PROBE._ping("http://127.0.0.1:50321"))
+            self.assertEqual(PROBE._ping_status("http://127.0.0.1:50321"), "ready")
         self.assertEqual(opener.call_args.args[0].proxies, {})
         self.assertEqual(op.timeout, 0.4)
         self.assertEqual(op.request.full_url, "http://127.0.0.1:50321/ping")

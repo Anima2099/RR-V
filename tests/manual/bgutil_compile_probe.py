@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -22,7 +23,7 @@ import tempfile
 import threading
 import time
 from typing import BinaryIO
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
 
@@ -44,6 +45,7 @@ BUNDLER_TIMEOUT = 120
 BUNDLER_CACHE_NAME = "bgutil-stage03-p3-cache"
 BUNDLER_MARKER = "rrv-p3-bundler-ready"
 PROBE_TIMEOUT = 70.0
+PROBE_LOG_STREAM_LIMIT = 256 * 1024
 PRODUCTION_FIRST_BUDGET_MS = 18_000
 MIN_FREE_BYTES = 512 * 1024 * 1024
 # server/deno.lock from bgutil.SOURCE_COMMIT, normalized to LF.
@@ -338,17 +340,30 @@ def _allocate_port() -> int:
         return sock.getsockname()[1]
 
 
-def _ping(url: str) -> bool:
+def _ping_status(url: str) -> str:
     try:
         opener = build_opener(ProxyHandler({}))
         request = Request(url + "/ping", headers={"Accept": "application/json"})
         with opener.open(request, timeout=0.4) as response:
             if response.status != 200:
-                return False
+                return f"http-{response.status}"
             body = json.loads(response.read(2048))
-        return isinstance(body, dict) and body.get("version") == bgutil.PROVIDER_VERSION
-    except (OSError, URLError, ValueError, TypeError):
-        return False
+    except HTTPError as error:
+        error.close()
+        return f"http-{error.code}"
+    except URLError as error:
+        if isinstance(error.reason, TimeoutError):
+            return "timeout"
+        if isinstance(error.reason, ConnectionRefusedError):
+            return "connection-refused"
+        return "connection-error"
+    except TimeoutError:
+        return "timeout"
+    except OSError:
+        return "connection-error"
+    except (ValueError, TypeError):
+        return "invalid-response"
+    return "ready" if isinstance(body, dict) and body.get("version") == bgutil.PROVIDER_VERSION else "version-mismatch"
 
 
 def _terminate(process: subprocess.Popen[bytes]) -> None:
@@ -365,12 +380,60 @@ def _terminate(process: subprocess.Popen[bytes]) -> None:
             pass
 
 
-def _drain_probe_stderr(stream: BinaryIO, tail: deque[bytes]) -> None:
+class _ProbeTrace:
+    """In-memory capture for the explicitly requested local report."""
+
+    def __init__(self) -> None:
+        self.started_at = datetime.now(timezone.utc).isoformat()
+        self.start = time.monotonic()
+        self.lock = threading.Lock()
+        self.events: list[str] = []
+        self.streams = {"stdout": bytearray(), "stderr": bytearray()}
+        self.received = {"stdout": 0, "stderr": 0}
+
+    def _record(self, event: str) -> None:
+        elapsed_ms = round((time.monotonic() - self.start) * 1000)
+        self.events.append(f"+{elapsed_ms} ms {event}")
+
+    def record(self, event: str) -> None:
+        with self.lock:
+            self._record(event)
+
+    def capture(self, channel: str, block: bytes) -> None:
+        with self.lock:
+            if not self.received[channel]:
+                self._record(f"first {channel} bytes")
+            self.received[channel] += len(block)
+            buffer = self.streams[channel]
+            remaining = PROBE_LOG_STREAM_LIMIT - len(buffer)
+            buffer.extend(block[:remaining])
+
+    def render(self, variant: str, status: str, elapsed: int, attempts: int) -> str:
+        with self.lock:
+            lines = [
+                "RR-V Stage03 P3 verbose probe (local diagnostic)",
+                f"started_at_utc={self.started_at}",
+                f"variant={variant} expected_version={bgutil.PROVIDER_VERSION} timeout_s={PROBE_TIMEOUT}",
+                f"result={status} elapsed_ms={elapsed} ping_attempts={attempts}",
+                "\n--- timeline ---", *self.events,
+            ]
+            for channel, buffer in self.streams.items():
+                lines.append(f"\n--- {channel} ({len(buffer)} of {self.received[channel]} bytes captured) ---")
+                lines.append(buffer.decode("utf-8", errors="replace") if buffer else "(empty)")
+            return "\n".join(lines) + "\n"
+
+
+def _drain_probe_stream(
+    stream: BinaryIO, channel: str, tail: deque[bytes], trace: _ProbeTrace | None,
+) -> None:
     try:
         with stream:
             read = getattr(stream, "read1", stream.read)
             while block := read(1024):
-                tail.append(block)
+                if channel == "stderr":
+                    tail.append(block)
+                if trace is not None:
+                    trace.capture(channel, block)
     except (OSError, ValueError):
         pass
 
@@ -393,7 +456,9 @@ def _probe_failure_reason(stderr: bytes) -> str:
     return "unclassified"
 
 
-def probe(target: Path, variant: str, *, timeout: float = PROBE_TIMEOUT) -> tuple[str, int, int]:
+def probe(
+    target: Path, variant: str, *, timeout: float = PROBE_TIMEOUT, trace: _ProbeTrace | None = None,
+) -> tuple[str, int, int]:
     """Launch only the compiled file from an isolated cwd. No source pre-run."""
     if variant not in VARIANTS:
         return "unsupported-variant", 0, 0
@@ -409,44 +474,59 @@ def probe(target: Path, variant: str, *, timeout: float = PROBE_TIMEOUT) -> tupl
     process = None
     # Drain continuously to avoid blocking the child on a full pipe.
     stderr_tail: deque[bytes] = deque(maxlen=16)
-    stderr_reader = None
+    readers = []
+    record = trace.record if trace is not None else lambda event: None
     try:
+        record("launch requested")
         process = subprocess.Popen(
             [str(binary), "--host", "127.0.0.1", "--port", str(port)],
             cwd=str(target),  # Never rely on an ambient node_modules cwd.
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE if trace is not None else subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        if process.stderr is not None:
-            stderr_reader = threading.Thread(
-                target=_drain_probe_stderr, args=(process.stderr, stderr_tail), daemon=True,
-            )
-            stderr_reader.start()
+        record("process launched")
+        for channel in ("stderr", "stdout"):
+            stream = getattr(process, channel, None)
+            if stream is not None:
+                reader = threading.Thread(
+                    target=_drain_probe_stream, args=(stream, channel, stderr_tail, trace), daemon=True,
+                )
+                reader.start()
+                readers.append(reader)
         url = f"http://127.0.0.1:{port}"
         while time.monotonic() - start < timeout:
             code = process.poll()
             if code is not None:
                 elapsed = round((time.monotonic() - start) * 1000)
-                if stderr_reader is not None:
-                    stderr_reader.join(timeout=0.2)
+                record(f"process exited before readiness: code={code}")
+                for reader in readers:
+                    reader.join(timeout=0.2)
                 reason = _probe_failure_reason(b"".join(stderr_tail.copy()))
                 status = f"compiled-exited-before-ready:code={int(code)} | reason={reason}"
                 return status, elapsed, attempts
             attempts += 1
-            if _ping(url):
+            record(f"ping {attempts} started")
+            ping_status = _ping_status(url)
+            record(f"ping {attempts}: {ping_status}")
+            if ping_status == "ready":
                 elapsed = round((time.monotonic() - start) * 1000)
                 return ("late-ready" if elapsed > PRODUCTION_FIRST_BUDGET_MS else "ready"), elapsed, attempts
             time.sleep(0.2)
         return "compiled-timeout", round((time.monotonic() - start) * 1000), attempts
-    except (OSError, ValueError):
+    except (OSError, ValueError) as error:
+        record(f"launch or probe failed: {type(error).__name__}, os_error={getattr(error, 'winerror', None) or getattr(error, 'errno', None)}")
         return "compiled-launch-error", round((time.monotonic() - start) * 1000), attempts
     finally:
         if process is not None:
             _terminate(process)
-        if stderr_reader is not None and stderr_reader.is_alive():
-            stderr_reader.join(timeout=0.2)
+            record(f"cleanup finished: code={process.poll()}")
+        for reader in readers:
+            if reader.is_alive():
+                reader.join(timeout=0.2)
+                if reader.is_alive():
+                    record("output stream did not finish draining")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -457,7 +537,10 @@ def main(argv: list[str] | None = None) -> int:
     action.add_argument("--probe", action="store_true", help="Probe an existing candidate without pre-warming it")
     action.add_argument("--verify", action="store_true", help="Hash-check existing compiled file")
     parser.add_argument("--variant", choices=VARIANTS, default="bundled")
+    parser.add_argument("--verbose", action="store_true", help="With --probe, save a detailed log locally")
     args = parser.parse_args(argv)
+    if args.verbose and not args.probe:
+        parser.error("--verbose requires --probe")
     local = os.environ.get("LOCALAPPDATA", "").strip()
     if not local or os.name != "nt":
         print("BGUTIL P3: requires-windows-localappdata")
@@ -476,7 +559,21 @@ def main(argv: list[str] | None = None) -> int:
         status = "verified" if _looks_prepared(target, args.variant, hash_file=True) else "not-built-or-invalid"
         print(f"BGUTIL P3 VERIFY: {status} | variant={args.variant}")
         return 0 if status == "verified" else 1
-    status, elapsed, attempts = probe(target, args.variant)
+    if args.verbose:
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", prefix="bgutil-p3-probe-", suffix=".log",
+                dir=target.parent, delete=False,
+            ) as report:
+                trace = _ProbeTrace()
+                status, elapsed, attempts = probe(target, args.variant, trace=trace)
+                report.write(trace.render(args.variant, status, elapsed, attempts))
+            print(f"BGUTIL P3 LOG: %LOCALAPPDATA%\\RR-V\\diagnostics\\{Path(report.name).name}")
+        except OSError:
+            print("BGUTIL P3 LOG: write-failed")
+            return 1
+    else:
+        status, elapsed, attempts = probe(target, args.variant)
     print(f"BGUTIL P3 PROBE: {status} | variant={args.variant} | elapsed_ms={elapsed} | ping_attempts={attempts}")
     print("No YouTube, WPC, Chrome, tokens, cookies or downloads were used.")
     return 0 if status in ("ready", "late-ready") else 1

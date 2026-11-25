@@ -48,8 +48,8 @@ separate, explicitly approved follow-up test.
   `cache_ref` with a recognized public package name or public host when known.
   If the compiled server exits before responding, `--probe` reports its exit
   code and a fixed startup error category in `reason`.
-  Raw child output is never printed or saved. No private file paths, network
-  port, URLs, credentials, or tokens are reported.
+  The standard console output contains no raw child output. The explicit
+  verbose option below adds a private local report.
 - An unknown existing target folder is **never overwritten**. After a failed
   compile, only a new folder created by that attempt is cleaned up.
 
@@ -94,6 +94,20 @@ separate, explicitly approved follow-up test.
 
 5. Send the status lines or a screenshot of the whole terminal result.
    No extra log files or ETL trace are required initially.
+
+For an unclassified startup failure, rerun only the probe against the existing
+executable:
+
+```powershell
+.\.venv\Scripts\python.exe .\tests\manual\bgutil_compile_probe.py --probe --verbose
+```
+
+`BGUTIL P3 LOG` identifies a new local file under
+`%LOCALAPPDATA%\RR-V\diagnostics`. It records launch, first output, HTTP results,
+process exit and cleanup, with stdout and stderr in separate sections. Each
+stream retains up to 256 KiB and reports how many bytes were captured and read.
+The report contains raw process output and is not uploaded. Review and redact
+private paths, URLs, or credentials before sharing excerpts.
 
 Optional file hash validation (not for timing):
 
