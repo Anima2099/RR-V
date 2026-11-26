@@ -43,7 +43,7 @@ from services import bgutil_http_service as bgutil
 # run from the ordinary compiled bundle. It is NOT the default: extraction
 # adds file writes and can undermine the cold-start optimization objective.
 VARIANTS = ("bundled", "extracted", "unbundled")
-MARKER_NAME = "rrv-p3-compiled.json"
+MARKER_NAME = bgutil.COMPILED_MARKER_NAME
 LEAN_MARKER = "rrv-lean-experiment.json"
 BUILD_TIMEOUT = 360
 BUNDLER_TIMEOUT = 120
@@ -193,28 +193,10 @@ def _compiled_marker(variant: str, binary: Path) -> dict[str, str | int]:
 def _looks_prepared(target: Path, variant: str, *, hash_file: bool = False) -> bool:
     """Check a tiny marker and stat. Do not pre-warm binary for a cold probe."""
     try:
-        marker = json.loads((target / MARKER_NAME).read_text(encoding="utf-8"))
-        if not isinstance(marker, dict):
-            return False
         binary = target / binary_name(variant)
-        if (
-            marker.get("schema") != 1
-            or marker.get("source_commit") != bgutil.SOURCE_COMMIT
-            or marker.get("variant") != variant
-            or not isinstance(marker.get("size"), int)
-            or marker["size"] < 1
-            or not isinstance(marker.get("sha256"), str)
-            or len(marker["sha256"]) != 64
-            or any(character not in "0123456789abcdef" for character in marker["sha256"])
-            or not binary.is_file()
-            or binary.is_symlink()
-            or binary.stat().st_size != marker["size"]
-        ):
-            return False
-        if hash_file and _compiled_marker(variant, binary) != marker:
-            return False
-        return True
-    except (OSError, ValueError, KeyError, TypeError):
+        marker = bgutil.read_compiled_candidate(binary, variant)
+        return marker is not None and (not hash_file or _compiled_marker(variant, binary) == marker)
+    except (OSError, ValueError):
         return False
 
 

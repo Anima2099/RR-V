@@ -166,6 +166,40 @@ contains token request and response signals, not token values or raw yt-dlp
 output. Server output capture stops before the live token phase. Send both
 `bgutil-p3-cold-*.log` reports after reviewing them for any private details.
 
+## RR-V development app smoke test
+
+After the unbundled candidate has passed the local probe, close RR-V completely
+and start the development app from VS Code PowerShell with both variables set:
+
+```powershell
+$env:RRV_BGUTIL_STAGE03_HOME = "$env:LOCALAPPDATA\RR-V\diagnostics\bgutil-stage03-lean-experiment"
+$env:RRV_BGUTIL_STAGE03_COMPILED_EXE = "$env:LOCALAPPDATA\RR-V\diagnostics\bgutil-stage03-compiled-unbundled\bgutil-p3-unbundled.exe"
+.\.venv\Scripts\python.exe .\main.py
+```
+
+Analyze and download a public YouTube video you are authorized to download.
+`%APPDATA%\RR-V\logs\bgutil-stage03.log` should contain `event=bgutil.startup`
+with `runtime=compiled` and `phase=ready`, followed by `youtube.providers`
+entries for analysis and download. The executable and P3 marker stay local.
+RR-V checks the marker and file size on launch. The P3 `--verify --variant
+unbundled` command can check the full hash separately when needed.
+
+To exercise missing-file fallback, fully close the app and override only the
+image path in the same terminal before launching again:
+
+```powershell
+$env:RRV_BGUTIL_STAGE03_COMPILED_EXE = "$env:LOCALAPPDATA\RR-V\diagnostics\missing-p3-candidate\bgutil-p3-unbundled.exe"
+.\.venv\Scripts\python.exe .\main.py
+```
+
+Analyze the same video. Look for `event=bgutil.runtime`, `result=fallback`,
+and `status=compiled-candidate-unavailable`, followed by `bgutil.startup`
+with `runtime=deno`. If Deno fails to become ready within its existing startup
+budget, the existing WPC fallback applies. A compiled startup failure also
+switches to Deno, and RR-V retains that choice for the same configuration until
+the app restarts. Remove `RRV_BGUTIL_STAGE03_COMPILED_EXE` to select Deno
+directly when Stage03 is enabled.
+
 Optional file hash validation (not for timing):
 
 ```powershell

@@ -149,6 +149,113 @@ class BgutilHTTPTests(unittest.TestCase):
             self.assertIsNone(server.ensure(self.root, self.deno))
         self.assertEqual(server.status(), "deno-exited-before-ready:code=27")
 
+    def _compiled_candidate(self):
+        folder = self.root.resolve() / "compiled"
+        folder.mkdir()
+        binary = folder / bgutil.UNBUNDLED_EXE_NAME
+        binary.write_bytes(b"fake P3 binary")
+        (folder / bgutil.COMPILED_MARKER_NAME).write_text(json.dumps({
+            "schema": 1, "source_commit": bgutil.SOURCE_COMMIT, "variant": "unbundled",
+            "size": binary.stat().st_size, "sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+        }), encoding="utf-8")
+        return binary
+
+    def test_compiled_opt_in_reuses_server_without_reading_binary_then_recovers_via_deno(self):
+        server = bgutil._BgUtilServer()
+        compiled = self._compiled_candidate()
+        first, second = FakeProcess(), FakeProcess()
+        with (
+            patch.object(bgutil, "_free_loopback_port", side_effect=[12024, 12025]),
+            patch.object(bgutil, "_ping_local_provider", return_value=True),
+            patch.object(bgutil.subprocess, "Popen", side_effect=[first, second]) as popen,
+            patch.object(bgutil, "record_bgutil_diagnostic") as log,
+            patch.object(Path, "read_bytes", side_effect=AssertionError("would warm the executable")),
+            patch.object(bgutil, "_validate_external_home", return_value=True),
+        ):
+            connection = server.ensure(self.root, self.deno, compiled)
+            self.assertEqual(server.ensure(self.root, self.deno, compiled), connection)
+            self.assertEqual(connection.plugin_dir, self.root.resolve())
+            self.assertEqual(popen.call_count, 1)
+            cmd = popen.call_args.args[0]
+            self.assertEqual(cmd, [str(compiled), "--host", "127.0.0.1", "--port", "12024"])
+            self.assertEqual(popen.call_args.kwargs["cwd"], str(compiled.parent))
+            first._poll = 1
+            self.assertEqual(server.ensure(self.root, self.deno, compiled).base_url, "http://127.0.0.1:12025")
+            self.assertEqual(popen.call_args.args[0][:2], [str(self.deno.resolve()), "run"])
+            self.assertIn("server-stopped-or-not-responding", [call.kwargs["status"] for call in log.call_args_list])
+            server.close()
+        self.assertEqual(second.terminated, 1)
+
+    def test_compiled_launch_failure_falls_back_to_deno_in_same_request(self):
+        server = bgutil._BgUtilServer()
+        compiled = self._compiled_candidate()
+        deno_process = FakeProcess()
+        with (
+            patch.object(bgutil, "_free_loopback_port", side_effect=[12024, 12025]),
+            patch.object(bgutil, "_ping_local_provider", return_value=True),
+            patch.object(bgutil.subprocess, "Popen", side_effect=[OSError("private path"), deno_process]) as popen,
+            patch.object(bgutil, "record_bgutil_diagnostic") as log,
+        ):
+            self.assertEqual(server.ensure(self.root, self.deno, compiled).base_url, "http://127.0.0.1:12025")
+            self.assertEqual([call.args[0][0] for call in popen.call_args_list], [str(compiled), str(self.deno.resolve())])
+            fallback = next(call for call in log.call_args_list if call.args[0] == "bgutil.runtime")
+            self.assertEqual(fallback.kwargs["status"], "compiled-launch-failed:OSError")
+            self.assertEqual(fallback.kwargs["result"], "fallback")
+            self.assertNotIn("private path", str(log.call_args_list))
+            server.close()
+
+    def test_compiled_budget_counts_process_creation_and_stops_child_before_fallback(self):
+        server = bgutil._BgUtilServer()
+        compiled = self._compiled_candidate()
+        first, second = FakeProcess(), FakeProcess()
+        clock = [0.0]
+
+        def launch(command, **_kwargs):
+            if command[0] == str(compiled):
+                clock[0] += 18.1
+                return first
+            self.assertEqual(first.terminated, 1)
+            return second
+
+        with (
+            patch.object(bgutil, "_free_loopback_port", side_effect=[12024, 12025]),
+            patch.object(bgutil.time, "monotonic", side_effect=lambda: clock[0]),
+            patch.object(bgutil, "_ping_local_provider", return_value=True) as ping,
+            patch.object(bgutil.subprocess, "Popen", side_effect=launch),
+        ):
+            self.assertEqual(server.ensure(self.root, self.deno, compiled).base_url, "http://127.0.0.1:12025")
+            ping.assert_called_once_with("http://127.0.0.1:12025")
+            server.close()
+
+    def test_invalid_compiled_candidate_leaves_normal_deno_route_available(self):
+        server = bgutil._BgUtilServer()
+        compiled = self._compiled_candidate()
+        compiled.write_bytes(b"wrong size")
+        with (
+            patch.object(bgutil, "_free_loopback_port", return_value=12024),
+            patch.object(bgutil, "_ping_local_provider", return_value=True),
+            patch.object(bgutil.subprocess, "Popen", return_value=FakeProcess()) as popen,
+            patch.object(bgutil, "record_bgutil_diagnostic") as log,
+        ):
+            self.assertIsNotNone(server.ensure(self.root, self.deno, compiled))
+            popen.assert_called_once()
+            self.assertEqual(popen.call_args.args[0][0], str(self.deno.resolve()))
+            self.assertIn("compiled-candidate-unavailable", [call.kwargs["status"] for call in log.call_args_list])
+            server.close()
+
+    def test_compiled_environment_setting_requires_explicit_stage03_home(self):
+        binary = self.root / bgutil.UNBUNDLED_EXE_NAME
+        with (
+            patch.object(bgutil.sys, "platform", "win32"),
+            patch.dict(os.environ, {bgutil.ENV_COMPILED_EXE: str(binary)}, clear=True),
+            patch.object(bgutil._SERVER, "ensure", return_value=None) as ensure,
+        ):
+            self.assertIsNone(bgutil.connect_bgutil_http(self.deno))
+            ensure.assert_not_called()
+            os.environ[bgutil.ENV_HOME] = str(self.root)
+            bgutil.connect_bgutil_http(self.deno)
+            ensure.assert_called_once_with(self.root, self.deno, binary)
+
     def test_startup_output_classifies_without_persisting_raw_bytes(self):
         monitor = bgutil._SafeDenoOutput()
         secret = b"TOP_SECRET_TOKEN_DATA_EXAMPLE_12345"

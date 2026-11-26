@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
@@ -26,6 +27,9 @@ from app.bgutil_diagnostics import record_bgutil_diagnostic
 
 
 ENV_HOME = "RRV_BGUTIL_STAGE03_HOME"
+ENV_COMPILED_EXE = "RRV_BGUTIL_STAGE03_COMPILED_EXE"
+COMPILED_MARKER_NAME = "rrv-p3-compiled.json"
+UNBUNDLED_EXE_NAME = "bgutil-p3-unbundled.exe"
 PROVIDER_VERSION = "2.0.2"
 SOURCE_COMMIT = "26475e9d3665b972c4aeb83b4dbaafcf64b88438"
 PLUGIN_SHA256 = "a26b980bf6d8e8400d8f21445daa4d8381bf6183d20f0be309391f86b31e27ef"
@@ -40,6 +44,38 @@ _RETRY_DELAY = 60.0
 class BgUtilConnection:
     plugin_dir: Path
     base_url: str
+
+
+def read_compiled_candidate(binary: Path, variant: str) -> dict | None:
+    """Check local build metadata and size without reading the executable."""
+    try:
+        marker = json.loads((binary.parent / COMPILED_MARKER_NAME).read_text(encoding="utf-8"))
+        if (
+            isinstance(marker, dict)
+            and marker.get("schema") == 1
+            and marker.get("source_commit") == SOURCE_COMMIT
+            and marker.get("variant") == variant
+            and type(marker.get("size")) is int
+            and marker["size"] > 0
+            and isinstance(marker.get("sha256"), str)
+            and re.fullmatch(r"[0-9a-f]{64}", marker["sha256"])
+            and not binary.is_symlink()
+            and binary.is_file()
+            and binary.stat().st_size == marker["size"]
+        ):
+            return marker
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _is_local_unbundled(binary: Path) -> bool:
+    if not binary.is_absolute() or binary.drive.startswith(("\\\\", "//")) or binary.name != UNBUNDLED_EXE_NAME:
+        return False
+    try:
+        return binary.resolve() == binary and read_compiled_candidate(binary, "unbundled") is not None
+    except (OSError, ValueError, RuntimeError):
+        return False
 
 
 def _validate_external_home(home: Path) -> bool:
@@ -91,7 +127,7 @@ def _ping_local_provider(url: str) -> bool:
             if response.status != 200:
                 return False
             payload = json.loads(response.read(2048))
-        return payload.get("version") == PROVIDER_VERSION
+        return isinstance(payload, dict) and payload.get("version") == PROVIDER_VERSION
     except (OSError, URLError, ValueError):
         return False
 
@@ -200,6 +236,9 @@ class _BgUtilServer:
         self._process: subprocess.Popen[bytes] | None = None
         self._home: Path | None = None
         self._deno: Path | None = None
+        self._compiled: Path | None = None
+        self._compiled_failed = False
+        self._runtime = "none"
         self._url = ""
         self._failed_until = 0.0
         self._verified_home: Path | None = None
@@ -228,20 +267,22 @@ class _BgUtilServer:
                 pass
             return 0
 
-    def ensure(self, home: Path, deno: Path) -> BgUtilConnection | None:
+    def ensure(self, home: Path, deno: Path, compiled: Path | None = None) -> BgUtilConnection | None:
         with self._lock:
             home = home.resolve()
             deno = deno.resolve()
             if not deno.is_file():
                 self._status = "deno-executable-missing"
                 return None
-            if self._home != home or self._deno != deno:
+            if (self._home, self._deno, self._compiled) != (home, deno, compiled):
                 self._stop_locked()
                 self._failed_until = 0.0
                 self._verified_home = None
                 self._cold_start_grace_available = True
                 self._status = "starting"
                 self._home, self._deno = home, deno
+                self._compiled = compiled
+                self._compiled_failed = False
             if self._verified_home != home:
                 if not _validate_external_home(home):
                     self._status = "invalid-external-installation"
@@ -253,115 +294,129 @@ class _BgUtilServer:
                     self._status = "ready"
                     return BgUtilConnection(home, self._url)
                 self._status = "server-stopped-or-not-responding"
+                if self._runtime == "compiled":
+                    self._compiled_failed = True
+                    self._log_compiled_fallback()
                 self._stop_locked()
 
             if time.monotonic() < self._failed_until:
                 self._status = "retry-cooldown"
                 return None
 
-            port = _free_loopback_port()
-            url = f"http://127.0.0.1:{port}"
-            server = home / "server"
-            command = [
-                str(deno), "run", "--allow-env", "--allow-net", "--allow-ffi=.",
-                "--allow-read=.", "../src/main.ts", "--host", "127.0.0.1",
-                "--port", str(port),
-            ]
-            environment = os.environ.copy()
-            environment.update({
-                "DENO_DIR": str(home / "deno-cache"),
-                "DENO_NO_PROMPT": "1",
-                "DENO_NO_UPDATE_CHECK": "1",
-                "FORCE_COLOR": "false",
-            })
-            started_at = time.monotonic()
-            output = _SafeDenoOutput()
-            attempts = 0
-            process_pid = 0
+            if compiled is not None and not self._compiled_failed:
+                if _is_local_unbundled(compiled):
+                    connection = self._start_locked(home, compiled, runtime="compiled")
+                    if connection is not None:
+                        return connection
+                    self._compiled_failed = True
+                else:
+                    self._status = "compiled-candidate-unavailable"
+                self._log_compiled_fallback()
 
-            def startup_event(phase: str, *, final: bool = False) -> None:
-                kind, first_output_ms = output.snapshot(seal=final)
-                record_bgutil_diagnostic(
-                    "bgutil.startup",
-                    pid=os.getpid(),
-                    server_pid=process_pid,
-                    phase=phase,
-                    status=self._status,
-                    startup_ms=max(0, round((time.monotonic() - started_at) * 1000)),
-                    ping_attempts=attempts,
-                    output_kind=kind,
-                    first_output_ms=first_output_ms,
-                )
-
-            try:
-                process = subprocess.Popen(
-                    command,
-                    cwd=str(server / "node_modules"),
-                    env=environment,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
-                )
-            except OSError as error:
-                self._status = f"deno-launch-failed:{type(error).__name__}"
+            connection = self._start_locked(home, deno, runtime="deno")
+            if connection is None:
                 self._failed_until = time.monotonic() + _RETRY_DELAY
-                startup_event("launch-failed", final=True)
-                return None
+            return connection
 
-            self._home, self._deno = home, deno
-            self._process, self._url = process, url
-            process_pid = int(getattr(process, "pid", 0) or 0)
-            try:
-                output.start(process)
-            except (OSError, RuntimeError, AttributeError):
-                # Diagnostic capture is not allowed to break media analysis.
-                # Avoid leaving a child with an undrained stdout pipe.
-                self._status = "output-monitor-failed"
-                self._stop_locked()
-                self._failed_until = time.monotonic() + _RETRY_DELAY
-                startup_event("failed", final=True)
-                return None
-            self._status = "starting"
-            startup_event("spawned")
-            normal_deadline = time.monotonic() + _START_TIMEOUT
-            allow_grace = self._cold_start_grace_available
-            self._cold_start_grace_available = False
-            final_deadline = normal_deadline + (_COLD_START_GRACE if allow_grace else 0)
-            grace_logged = False
-            while time.monotonic() < final_deadline:
-                if process.poll() is not None:
-                    break
-                if not grace_logged and time.monotonic() >= normal_deadline:
-                    grace_logged = True
-                    startup_event("cold-grace")
-                attempts += 1
-                if _ping_local_provider(url):
-                    self._status = "ready"
-                    startup_event("ready", final=True)
-                    # yt-dlp --plugin-dirs scans immediate children of this
-                    # directory, including the verified plugin.zip archive.
-                    # Passing home/plugins would scan inside yt_dlp_plugins and
-                    # hide the provider namespace from the plugin loader.
-                    return BgUtilConnection(home, url)
-                time.sleep(0.2)
-            exit_code = process.poll()
-            self._status = (
-                f"deno-exited-before-ready:code={exit_code}"
-                if exit_code is not None else "server-ping-timeout"
+    def _log_compiled_fallback(self) -> None:
+        record_bgutil_diagnostic(
+            "bgutil.runtime", pid=os.getpid(), runtime="compiled", result="fallback", status=self._status,
+        )
+
+    def _start_locked(self, home: Path, executable: Path, *, runtime: str) -> BgUtilConnection | None:
+        port = _free_loopback_port()
+        url = f"http://127.0.0.1:{port}"
+        compiled = runtime == "compiled"
+        command = [str(executable)]
+        environment = os.environ.copy()
+        environment.update({"DENO_NO_PROMPT": "1", "DENO_NO_UPDATE_CHECK": "1", "FORCE_COLOR": "false"})
+        if compiled:
+            cwd = executable.parent
+        else:
+            cwd = home / "server" / "node_modules"
+            command.extend(["run", "--allow-env", "--allow-net", "--allow-ffi=.", "--allow-read=.", "../src/main.ts"])
+            environment["DENO_DIR"] = str(home / "deno-cache")
+        command.extend(["--host", "127.0.0.1", "--port", str(port)])
+        started_at = time.monotonic()
+        output = _SafeDenoOutput()
+        attempts = 0
+        process_pid = 0
+
+        def startup_event(phase: str, *, final: bool = False) -> None:
+            kind, first_output_ms = output.snapshot(seal=final)
+            record_bgutil_diagnostic(
+                "bgutil.startup",
+                pid=os.getpid(),
+                server_pid=process_pid,
+                runtime=runtime,
+                phase=phase,
+                status=self._status,
+                startup_ms=max(0, round((time.monotonic() - started_at) * 1000)),
+                ping_attempts=attempts,
+                output_kind=kind,
+                first_output_ms=first_output_ms,
             )
-            # Stop the child and drain buffered output before classifying
-            # startup failure. Never persist or print the actual output.
-            self._stop_locked()
-            output.wait_for_exit()
-            startup_event("failed", final=True)
-            self._failed_until = time.monotonic() + _RETRY_DELAY
+
+        try:
+            process = subprocess.Popen(
+                command, cwd=str(cwd), env=environment,
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
+            )
+        except (OSError, ValueError) as error:
+            self._status = f"{runtime}-launch-failed:{type(error).__name__}"
+            startup_event("launch-failed", final=True)
             return None
+
+        self._process, self._url, self._runtime = process, url, runtime
+        process_pid = int(getattr(process, "pid", 0) or 0)
+        try:
+            output.start(process)
+        except (OSError, RuntimeError, AttributeError):
+            self._status = "output-monitor-failed"
+            self._stop_locked()
+            startup_event("failed", final=True)
+            return None
+
+        self._status = "starting"
+        startup_event("spawned")
+        if compiled:
+            normal_deadline = final_deadline = started_at + _START_TIMEOUT + _COLD_START_GRACE
+        else:
+            normal_deadline = time.monotonic() + _START_TIMEOUT
+            final_deadline = normal_deadline + (_COLD_START_GRACE if self._cold_start_grace_available else 0)
+            self._cold_start_grace_available = False
+        grace_logged = False
+        while time.monotonic() < final_deadline:
+            if process.poll() is not None:
+                break
+            if not grace_logged and time.monotonic() >= normal_deadline:
+                grace_logged = True
+                startup_event("cold-grace")
+            attempts += 1
+            if _ping_local_provider(url) and (not compiled or time.monotonic() <= final_deadline):
+                self._status = "ready"
+                startup_event("ready", final=True)
+                # yt-dlp discovers the verified plugin.zip directly under home.
+                return BgUtilConnection(home, url)
+            time.sleep(0.2)
+        exit_code = process.poll()
+        if exit_code is None:
+            self._status = "server-ping-timeout"
+        elif compiled:
+            self._status = f"compiled-exited-before-ready-code-{exit_code}"
+        else:
+            self._status = f"deno-exited-before-ready:code={exit_code}"
+        self._stop_locked()
+        output.wait_for_exit()
+        startup_event("failed", final=True)
+        return None
 
     def _stop_locked(self) -> None:
         process = self._process
         self._process = None
         self._url = ""
+        self._runtime = "none"
         if process is None or process.poll() is not None:
             return
         try:
@@ -377,7 +432,7 @@ class _BgUtilServer:
     def close(self) -> None:
         with self._lock:
             self._stop_locked()
-            self._home = self._deno = None
+            self._home = self._deno = self._compiled = None
             self._status = "stopped"
             self._failed_until = 0.0
 
@@ -401,7 +456,9 @@ def connect_bgutil_http(deno: Path | None) -> BgUtilConnection | None:
         )
         return None
     try:
-        connection = _SERVER.ensure(Path(raw_home).expanduser(), deno)
+        raw_compiled = os.environ.get(ENV_COMPILED_EXE, "").strip() if sys.platform == "win32" else ""
+        compiled = Path(raw_compiled) if raw_compiled else None
+        connection = _SERVER.ensure(Path(raw_home).expanduser(), deno, compiled)
     except (OSError, ValueError) as error:
         _SERVER.record_status(f"connection-setup-failed:{type(error).__name__}")
         connection = None
